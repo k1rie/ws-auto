@@ -1,16 +1,24 @@
 import express from 'express';
 import whatsappController from '../controllers/whatsappController.js';
+import conexionesService from '../services/conexionesService.js';
+import { testConnection } from '../config/database.js';
 
 const router = express.Router();
 
 // Health check endpoint
-router.get('/health', (req, res) => {
+router.get('/health', async (req, res) => {
+  const dbConnected = await testConnection();
+  const activeConnections = whatsappController.clients.size;
+  
   res.json({ 
     status: 'ok', 
     message: 'Server is running',
+    database: {
+      connected: dbConnected
+    },
     whatsapp: {
-      ready: whatsappController.isReady,
-      connected: whatsappController.client !== null
+      activeConnections,
+      maxConnections: conexionesService.MAX_CONEXIONES
     }
   });
 });
