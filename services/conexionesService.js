@@ -17,61 +17,101 @@ dotenv.config();
  */
 class ConexionesService {
   constructor() {
-    // Límite máximo de conexiones simultáneas (configurable por variable de entorno)
+    // Límite máximo de conexiones simultáneas para envío de mensajes
     this.MAX_CONEXIONES = parseInt(process.env.MAX_CONEXIONES || '1');
-    this.activeSockets = new Map(); // Map<whatsappId, socket>
+    // Límite máximo de conexiones simultáneas para registro (obtener QR y guardar datos)
+    this.MAX_CONEXIONES_REGISTRO = parseInt(process.env.MAX_CONEXIONES_REGISTRO || '2');
+    this.activeSockets = new Map(); // Map<whatsappId, socket> - conexiones activas para envío
+    this.registrationSockets = new Map(); // Map<whatsappId, socket> - conexiones temporales para registro
   }
 
   /**
-   * Registra un socket activo
+   * Registra un socket activo (para envío de mensajes)
    */
-  registerSocket(whatsappId, socket) {
-    this.activeSockets.set(whatsappId, socket);
-    console.log(`📱 Socket registrado para ${whatsappId}. Total activos: ${this.activeSockets.size}`);
+  registerSocket(whatsappId, socket, isRegistration = false) {
+    if (isRegistration) {
+      this.registrationSockets.set(whatsappId, socket);
+      console.log(`📱 Socket de registro registrado para ${whatsappId}. Total registros: ${this.registrationSockets.size}/${this.MAX_CONEXIONES_REGISTRO}`);
+    } else {
+      this.activeSockets.set(whatsappId, socket);
+      console.log(`📱 Socket activo registrado para ${whatsappId}. Total activos: ${this.activeSockets.size}/${this.MAX_CONEXIONES}`);
+    }
   }
 
   /**
    * Elimina un socket activo
    */
   unregisterSocket(whatsappId) {
-    this.activeSockets.delete(whatsappId);
-    console.log(`📱 Socket eliminado para ${whatsappId}. Total activos: ${this.activeSockets.size}`);
+    // Intentar eliminar de ambos pools
+    const removedFromActive = this.activeSockets.delete(whatsappId);
+    const removedFromRegistration = this.registrationSockets.delete(whatsappId);
+    
+    if (removedFromActive) {
+      console.log(`📱 Socket activo eliminado para ${whatsappId}. Total activos: ${this.activeSockets.size}/${this.MAX_CONEXIONES}`);
+    }
+    if (removedFromRegistration) {
+      console.log(`📱 Socket de registro eliminado para ${whatsappId}. Total registros: ${this.registrationSockets.size}/${this.MAX_CONEXIONES_REGISTRO}`);
+    }
   }
 
   /**
-   * Obtiene un socket por whatsappId
+   * Obtiene un socket por whatsappId (busca en ambos pools)
    */
   getSocketByWhatsAppId(whatsappId) {
-    return this.activeSockets.get(whatsappId) || null;
+    return this.activeSockets.get(whatsappId) || this.registrationSockets.get(whatsappId) || null;
   }
 
   /**
    * Verifica si hay espacio disponible para un nuevo socket (cliente de WhatsApp)
-   * NOTA: Solo verifica sockets activos, NO conexiones en BD
+   * @param {boolean} isRegistration - Si es true, verifica el límite de registro; si es false, verifica el límite de envío
    */
-  canCreateSocket() {
-    const socketsActivos = this.activeSockets.size;
-    const disponible = socketsActivos < this.MAX_CONEXIONES;
-    
-    console.log(`🔍 Verificación de socket: ${socketsActivos}/${this.MAX_CONEXIONES} sockets activos`);
-    
-    return disponible;
+  canCreateSocket(isRegistration = false) {
+    if (isRegistration) {
+      const socketsRegistro = this.registrationSockets.size;
+      const disponible = socketsRegistro < this.MAX_CONEXIONES_REGISTRO;
+      console.log(`🔍 Verificación de socket de registro: ${socketsRegistro}/${this.MAX_CONEXIONES_REGISTRO} sockets de registro`);
+      return disponible;
+    } else {
+      const socketsActivos = this.activeSockets.size;
+      const disponible = socketsActivos < this.MAX_CONEXIONES;
+      console.log(`🔍 Verificación de socket activo: ${socketsActivos}/${this.MAX_CONEXIONES} sockets activos`);
+      return disponible;
+    }
   }
 
   /**
    * Obtiene el número de sockets disponibles
-   * NOTA: Solo cuenta sockets, no conexiones en BD
+   * @param {boolean} isRegistration - Si es true, retorna slots de registro; si es false, retorna slots de envío
    */
-  getAvailableSlots() {
-    const socketsActivos = this.activeSockets.size;
-    return Math.max(0, this.MAX_CONEXIONES - socketsActivos);
+  getAvailableSlots(isRegistration = false) {
+    if (isRegistration) {
+      const socketsRegistro = this.registrationSockets.size;
+      return Math.max(0, this.MAX_CONEXIONES_REGISTRO - socketsRegistro);
+    } else {
+      const socketsActivos = this.activeSockets.size;
+      return Math.max(0, this.MAX_CONEXIONES - socketsActivos);
+    }
   }
 
   /**
-   * Obtiene el número de sockets activos
+   * Obtiene el número de sockets activos (para envío)
    */
   getActiveSocketsCount() {
     return this.activeSockets.size;
+  }
+
+  /**
+   * Obtiene el número de sockets de registro
+   */
+  getRegistrationSocketsCount() {
+    return this.registrationSockets.size;
+  }
+
+  /**
+   * Obtiene el total de sockets (activos + registro)
+   */
+  getTotalSocketsCount() {
+    return this.activeSockets.size + this.registrationSockets.size;
   }
 
   /**
@@ -85,10 +125,10 @@ class ConexionesService {
 
   /**
    * Verifica si se puede crear un nuevo socket (cliente de WhatsApp)
-   * Solo verifica sockets activos, no conexiones en BD
+   * @param {boolean} isRegistration - Si es true, verifica el límite de registro; si es false, verifica el límite de envío
    */
-  canCreateNewSocket() {
-    return this.canCreateSocket();
+  canCreateNewSocket(isRegistration = false) {
+    return this.canCreateSocket(isRegistration);
   }
 
   /**

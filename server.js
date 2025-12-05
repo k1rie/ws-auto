@@ -93,12 +93,15 @@ const server = app.listen(PORT, async () => {
   console.log(`   POST http://localhost:${PORT}/api/whatsapp/reset-sockets (🔄 Reiniciar todos los sockets)`);
   console.log(`   POST http://localhost:${PORT}/api/upload-csv`);
   console.log(`   GET  http://localhost:${PORT}/api/conexiones`);
+  console.log(`   POST http://localhost:${PORT}/api/conexiones (📝 Crear conexión en BD)`);
+  console.log(`   POST http://localhost:${PORT}/api/conexiones/register (📱 Registrar dispositivo: QR → guardar → cerrar)`);
   console.log(`   GET  http://localhost:${PORT}/api/contactos?sessionId=xxx`);
   console.log(`   GET  http://localhost:${PORT}/api/dashboard`);
   console.log(`   GET  http://localhost:${PORT}/api/queue`);
   console.log(`   GET  http://localhost:${PORT}/api/device/info?whatsappId=xxx`);
   console.log(`\n📊 Configuración:`);
-  console.log(`   Máximo de conexiones simultáneas: ${process.env.MAX_CONEXIONES || 1}`);
+  console.log(`   Máximo de conexiones para envío: ${process.env.MAX_CONEXIONES || 1}`);
+  console.log(`   Máximo de conexiones para registro: ${process.env.MAX_CONEXIONES_REGISTRO || 2}`);
   
   // Inicializar base de datos
   const dbConnected = await initializeDatabase();

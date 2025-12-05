@@ -11,6 +11,7 @@ class WhatsAppController {
     this.qrTimestamps = new Map(); // Map<whatsappId, timestamp> - rastrea cuándo se generó el último QR
     this.qrCounts = new Map(); // Map<whatsappId, count> - rastrea cuántas veces se ha generado un QR
     this.whatsappIdToRealNumber = new Map(); // Map<whatsappId, numeroReal> - mapeo de ID temporal a número real
+    this.autoCloseAfterRegister = new Set(); // Set<whatsappId> - conexiones que deben cerrarse después de registrar
     this.broadcastCallback = null;
     this.QR_COOLDOWN_MS = 60 * 1000; // 1 minuto de espera entre QR codes
     this.MAX_QR_ATTEMPTS = 2; // Máximo de QR codes sin escanear antes de cerrar
@@ -22,7 +23,7 @@ class WhatsAppController {
   }
 
   // Inicializar WhatsApp Client para un whatsappId específico
-  async initialize(whatsappId, nombreUsuario = null, forceReinitialize = false) {
+  async initialize(whatsappId, nombreUsuario = null, forceReinitialize = false, isRegistration = false) {
     // Verificar si ya existe un cliente para este whatsappId
     if (this.clients.has(whatsappId) && !forceReinitialize) {
       const client = this.clients.get(whatsappId);
@@ -69,15 +70,16 @@ class WhatsAppController {
     }
 
     // Verificar si hay espacio disponible para un nuevo socket
-    // NOTA: Solo verifica sockets activos, no conexiones en BD
-    const canCreate = conexionesService.canCreateSocket();
+    // Si es registro, usa el límite de registro; si no, usa el límite de envío
+    const canCreate = conexionesService.canCreateSocket(isRegistration);
     
     // Verificar si el dispositivo ya está registrado en la BD
     let conexionExistente = await getConexionByWhatsAppId(whatsappId);
     
     // Si NO hay espacio para el socket pero el dispositivo no está registrado,
     // registrarlo en la BD para que quede disponible cuando haya espacio
-    if (!canCreate && !conexionExistente) {
+    // (Solo para conexiones de envío, no para registro)
+    if (!isRegistration && !canCreate && !conexionExistente) {
       console.log(`📝 No hay espacio para socket, pero registrando dispositivo ${whatsappId} en la BD...`);
       await conexionesService.createOrUpdateConexion(whatsappId, nombreUsuario || whatsappId);
       console.log(`✅ Dispositivo ${whatsappId} registrado en la BD`);
@@ -86,14 +88,22 @@ class WhatsAppController {
       await conexionesService.createOrUpdateConexion(whatsappId, nombreUsuario);
     }
     
-    // Si no hay espacio para el socket, lanzar error (pero la conexión ya está registrada si no existía)
+    // Si no hay espacio para el socket, lanzar error
     if (!canCreate) {
-      const socketsActivos = conexionesService.getActiveSocketsCount();
-      throw new Error(
-        `No hay espacio disponible para un nuevo socket. Máximo ${conexionesService.MAX_CONEXIONES} socket(s) simultáneo(s). ` +
-        `Actualmente hay ${socketsActivos} socket(s) activo(s). ` +
-        `Nota: ${!conexionExistente ? 'El dispositivo ha sido registrado en la base de datos. ' : ''}Puedes tener múltiples conexiones en la base de datos, pero solo ${conexionesService.MAX_CONEXIONES} socket(s) activo(s) a la vez.`
-      );
+      if (isRegistration) {
+        const socketsRegistro = conexionesService.getRegistrationSocketsCount();
+        throw new Error(
+          `No hay espacio disponible para un nuevo socket de registro. Máximo ${conexionesService.MAX_CONEXIONES_REGISTRO} socket(s) de registro simultáneo(s). ` +
+          `Actualmente hay ${socketsRegistro} socket(s) de registro activo(s).`
+        );
+      } else {
+        const socketsActivos = conexionesService.getActiveSocketsCount();
+        throw new Error(
+          `No hay espacio disponible para un nuevo socket. Máximo ${conexionesService.MAX_CONEXIONES} socket(s) simultáneo(s). ` +
+          `Actualmente hay ${socketsActivos} socket(s) activo(s). ` +
+          `Nota: ${!conexionExistente ? 'El dispositivo ha sido registrado en la base de datos. ' : ''}Puedes tener múltiples conexiones en la base de datos, pero solo ${conexionesService.MAX_CONEXIONES} socket(s) activo(s) a la vez.`
+        );
+      }
     }
     
     // Si hay espacio, NO creamos la conexión aquí porque:
@@ -214,12 +224,15 @@ class WhatsAppController {
         await conexionesService.createOrUpdateConexion(whatsappId, whatsappId);
       }
       
+      // Determinar si esta conexión es de registro (basado en autoCloseAfterRegister)
+      const isRegistration = this.autoCloseAfterRegister.has(whatsappId) || this.autoCloseAfterRegister.has(numeroReal);
+      
       // Registrar socket en el servicio
       // Si el número real es diferente, registrar con ambos IDs para compatibilidad
-      conexionesService.registerSocket(whatsappId, client);
+      conexionesService.registerSocket(whatsappId, client, isRegistration);
       if (numeroReal !== whatsappId) {
         // También registrar con el número real para que se pueda encontrar por ese ID
-        conexionesService.registerSocket(numeroReal, client);
+        conexionesService.registerSocket(numeroReal, client, isRegistration);
       }
       
       // Asegurar que la conexión existe antes de actualizar el estado
@@ -234,6 +247,22 @@ class WhatsAppController {
       await updateConexionEstado(numeroReal, 'active');
       
       console.log(`✅ Conexión ${numeroReal} creada/actualizada y marcada como activa en la BD`);
+      
+      // Si esta conexión debe cerrarse automáticamente después de registrar
+      if (this.autoCloseAfterRegister.has(whatsappId) || this.autoCloseAfterRegister.has(numeroReal)) {
+        console.log(`🔒 Cerrando cliente ${whatsappId} automáticamente después de registrar...`);
+        // Esperar un momento para asegurar que los datos se guardaron
+        setTimeout(async () => {
+          try {
+            await this.logout(whatsappId);
+            this.autoCloseAfterRegister.delete(whatsappId);
+            this.autoCloseAfterRegister.delete(numeroReal);
+            console.log(`✅ Cliente ${whatsappId} cerrado automáticamente después de registrar`);
+          } catch (error) {
+            console.error(`Error cerrando cliente automáticamente:`, error);
+          }
+        }, 2000); // Esperar 2 segundos antes de cerrar
+      }
       
       this.broadcast({ type: 'ready', whatsappId, message: 'WhatsApp conectado exitosamente' });
     });
@@ -437,6 +466,7 @@ class WhatsAppController {
     this.qrCodes.clear();
     this.qrTimestamps.clear();
     this.qrCounts.clear();
+    this.autoCloseAfterRegister.clear();
     this.whatsappIdToRealNumber.clear();
   }
 
@@ -476,6 +506,7 @@ class WhatsAppController {
     this.qrCodes.clear();
     this.qrTimestamps.clear();
     this.qrCounts.clear();
+    this.autoCloseAfterRegister.clear();
     this.whatsappIdToRealNumber.clear();
     
     console.log(`✅ Reinicio completado. ${resultados.length} socket(s) procesado(s)`);
@@ -494,11 +525,14 @@ class WhatsAppController {
         this.clients.delete(whatsappId);
         this.qrCodes.delete(whatsappId);
         this.qrTimestamps.delete(whatsappId);
+        this.qrCounts.delete(whatsappId);
+        this.autoCloseAfterRegister.delete(whatsappId);
         conexionesService.unregisterSocket(whatsappId);
         // Si hay un número real mapeado, también desconectarlo
         const numeroReal = this.whatsappIdToRealNumber.get(whatsappId);
         if (numeroReal && numeroReal !== whatsappId) {
           conexionesService.unregisterSocket(numeroReal);
+          this.autoCloseAfterRegister.delete(numeroReal);
           await updateConexionEstado(numeroReal, 'inactive');
           this.whatsappIdToRealNumber.delete(whatsappId);
         } else {
@@ -511,11 +545,14 @@ class WhatsAppController {
         this.clients.delete(whatsappId);
         this.qrCodes.delete(whatsappId);
         this.qrTimestamps.delete(whatsappId);
+        this.qrCounts.delete(whatsappId);
+        this.autoCloseAfterRegister.delete(whatsappId);
         conexionesService.unregisterSocket(whatsappId);
         // Si hay un número real mapeado, también desconectarlo
         const numeroReal = this.whatsappIdToRealNumber.get(whatsappId);
         if (numeroReal && numeroReal !== whatsappId) {
           conexionesService.unregisterSocket(numeroReal);
+          this.autoCloseAfterRegister.delete(numeroReal);
           await updateConexionEstado(numeroReal, 'inactive');
           this.whatsappIdToRealNumber.delete(whatsappId);
         } else {
