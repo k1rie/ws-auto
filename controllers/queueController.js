@@ -3,6 +3,7 @@ import { getFaseConfig } from '../models/fasesModel.js';
 import { countContactosPendientesByConexion } from '../models/contactosModel.js';
 import conexionesService from '../services/conexionesService.js';
 import whatsappController from './whatsappController.js';
+import mensajeriaService from '../services/mensajeriaService.js';
 
 /**
  * Obtiene la cola de conexiones ordenada por prioridad
@@ -157,6 +158,27 @@ export async function updatePriority(req, res) {
       data: {
         whatsappId
       }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Fuerza el procesamiento inmediato de mensajes pendientes
+ * Útil cuando se actualizan números en la base de datos
+ */
+export async function forceProcess(req, res) {
+  try {
+    const resultado = await mensajeriaService.forceProcess();
+    
+    res.json({
+      success: true,
+      message: 'Procesamiento de mensajes iniciado. Los números actualizados en la base de datos serán procesados inmediatamente.',
+      data: resultado
     });
   } catch (error) {
     res.status(500).json({

@@ -4,7 +4,7 @@ import csv from 'csv-parser';
 import { createContactosBulk } from '../models/contactosModel.js';
 import { getConexionByWhatsAppId } from '../models/conexionesModel.js';
 import conexionesService from '../services/conexionesService.js';
-// Ya no necesitamos validar teléfonos, solo limpiarlos
+import whatsappVerificationService from '../services/whatsappVerificationService.js';
 
 /**
  * Procesa un archivo CSV y guarda los contactos en la base de datos
@@ -114,11 +114,24 @@ export async function uploadCSV(req, res) {
             const telefonoCorporate = getColumn('Corporate Phone');
             const telefonoOther = getColumn('Other Phone');
             
-            // Limpiar cada teléfono (solo quitar caracteres no numéricos)
+            // Limpiar cada teléfono (quitar caracteres no numéricos y normalizar números mexicanos)
             const cleanPhone = (phone) => {
               if (!phone) return null;
-              const cleaned = phone.toString().trim().replace(/\D/g, '');
-              return cleaned && cleaned !== '' ? cleaned : null;
+              let cleaned = phone.toString().trim().replace(/\D/g, '');
+              
+              if (!cleaned || cleaned === '') return null;
+              
+              // Normalizar números mexicanos: agregar "1" después de "52" si falta
+              // Formato correcto: 521XXXXXXXXXX (12 dígitos)
+              if (cleaned.startsWith('52') && cleaned.length === 11) {
+                // Agregar el "1" después del "52"
+                cleaned = '521' + cleaned.substring(2);
+              } else if (cleaned.startsWith('52') && cleaned.length === 12 && cleaned[2] !== '1') {
+                // Si tiene 12 dígitos pero el tercer dígito no es "1", agregarlo
+                cleaned = '521' + cleaned.substring(2);
+              }
+              
+              return cleaned;
             };
             
             const telefonoMobileLimpio = cleanPhone(telefonoMobile);
@@ -173,16 +186,153 @@ export async function uploadCSV(req, res) {
     if (contactos.length > 0) {
       console.log(`✅ Primer contacto válido:`, {
         nombre: contactos[0].nombre,
-        telefono: contactos[0].telefono,
-        telefono_usado: contactos[0].telefono_usado
+        telefono: contactos[0].telefono
       });
     }
     if (errors.length > 0) {
       console.log(`❌ Primer error:`, errors[0]);
     }
 
-    // Guardar contactos en base de datos (conexionId puede ser null)
-    const result = await createContactosBulk(conexionId, contactos);
+    // Verificar números en WhatsApp usando whatsapp-web.js
+    console.log(`🔍 Verificando números en WhatsApp...`);
+    const contactosVerificados = [];
+    const contactosRechazados = [];
+
+    // Verificar si hay una conexión disponible
+    const hayConexionDisponible = await whatsappVerificationService.isAvailable();
+    
+    if (!hayConexionDisponible) {
+      console.log(`⚠️  No hay conexión activa de WhatsApp disponible. Los contactos se guardarán sin verificación.`);
+      console.log(`💡 Asegúrate de tener al menos una conexión activa de WhatsApp para verificar números.`);
+      
+      // Si no está configurado, guardar todos los contactos sin verificar
+      const result = await createContactosBulk(conexionId, contactos);
+      
+      // Limpiar archivo temporal
+      fs.unlinkSync(filePath);
+      
+      return res.json({
+        success: true,
+        message: 'CSV procesado exitosamente (sin verificación - no hay conexión activa)',
+        data: {
+          total: contactos.length + errors.length,
+          guardados: result.inserted,
+          errores: errors.length + result.errors.length,
+          contactos: contactos.slice(0, 10).map(c => ({
+            nombre: c.nombre,
+            empresa: c.empresa,
+            telefono: c.telefono
+          })),
+          detalles_errores: [...errors, ...result.errors].slice(0, 10),
+          advertencia: 'No se pudo verificar números porque no hay conexión activa de WhatsApp disponible.'
+        }
+      });
+    }
+
+    // Recopilar todos los números únicos para verificar
+    const numerosUnicos = new Set();
+    const contactoPorNumero = new Map(); // Mapa para rastrear qué contactos tienen cada número
+
+    for (const contacto of contactos) {
+      const telefonos = [
+        contacto.telefono,
+        contacto.telefono_mobile,
+        contacto.telefono_corporate,
+        contacto.telefono_other
+      ].filter(t => t); // Filtrar nulos
+
+      for (const telefono of telefonos) {
+        numerosUnicos.add(telefono);
+        if (!contactoPorNumero.has(telefono)) {
+          contactoPorNumero.set(telefono, []);
+        }
+        contactoPorNumero.get(telefono).push(contacto);
+      }
+    }
+
+    console.log(`📊 Verificando ${numerosUnicos.size} números únicos...`);
+
+    // Verificar todos los números en lote
+    const resultadosVerificacion = await whatsappVerificationService.verifyBatch(Array.from(numerosUnicos));
+
+    // Procesar resultados y construir contactos verificados
+    const contactosProcesados = new Set(); // Para evitar duplicados
+
+    for (const contacto of contactos) {
+      const contactoId = `${contacto.nombre || ''}_${contacto.empresa || ''}`;
+      if (contactosProcesados.has(contactoId)) {
+        continue; // Ya procesado
+      }
+      contactosProcesados.add(contactoId);
+
+      let tieneNumeroValido = false;
+      const telefonosVerificados = {
+        telefono: null,
+        telefono_mobile: null,
+        telefono_corporate: null,
+        telefono_other: null
+      };
+
+      // Verificar cada número disponible en orden de prioridad
+      const telefonosParaVerificar = [
+        { key: 'telefono', value: contacto.telefono },
+        { key: 'telefono_mobile', value: contacto.telefono_mobile },
+        { key: 'telefono_corporate', value: contacto.telefono_corporate },
+        { key: 'telefono_other', value: contacto.telefono_other }
+      ];
+
+      for (const { key, value } of telefonosParaVerificar) {
+        if (!value) continue;
+
+        // Verificar si el número está registrado según los resultados
+        const estaRegistrado = resultadosVerificacion.get(value);
+
+        if (estaRegistrado === true) {
+          telefonosVerificados[key] = value;
+          if (!tieneNumeroValido) {
+            // El primer número válido será el teléfono principal
+            telefonosVerificados.telefono = value;
+            tieneNumeroValido = true;
+          }
+          console.log(`✅ Número ${value} verificado y está en WhatsApp`);
+        } else {
+          console.log(`❌ Número ${value} no está registrado en WhatsApp`);
+        }
+      }
+
+      // Si tiene al menos un número válido, agregar el contacto
+      if (tieneNumeroValido) {
+        contactosVerificados.push({
+          nombre: contacto.nombre,
+          empresa: contacto.empresa,
+          cargo: contacto.cargo,
+          telefono: telefonosVerificados.telefono,
+          telefono_mobile: telefonosVerificados.telefono_mobile,
+          telefono_corporate: telefonosVerificados.telefono_corporate,
+          telefono_other: telefonosVerificados.telefono_other,
+          mensaje_personalizado: contacto.mensaje_personalizado
+        });
+      } else {
+        // Si ningún número está en WhatsApp, no agregar el contacto
+        contactosRechazados.push({
+          nombre: contacto.nombre || 'Sin nombre',
+          empresa: contacto.empresa || 'Sin empresa',
+          razon: 'Ninguno de los números está registrado en WhatsApp'
+        });
+        errors.push({
+          row: {
+            nombre: contacto.nombre || 'Sin nombre',
+            empresa: contacto.empresa || 'Sin empresa'
+          },
+          error: 'Ninguno de los números está registrado en WhatsApp'
+        });
+      }
+    }
+
+    console.log(`✅ Verificación completada: ${contactosVerificados.length} contactos válidos, ${contactosRechazados.length} rechazados`);
+
+    // Guardar solo los contactos verificados en base de datos
+    const result = await createContactosBulk(conexionId, contactosVerificados);
 
     // Limpiar archivo temporal
     fs.unlinkSync(filePath);
@@ -192,17 +342,19 @@ export async function uploadCSV(req, res) {
     
     res.json({
       success: true,
-      message: 'CSV procesado exitosamente',
+      message: 'CSV procesado exitosamente con verificación de WhatsApp',
       data: {
         total: contactos.length + errors.length,
+        verificados: contactosVerificados.length,
+        rechazados: contactosRechazados.length,
         guardados: result.inserted,
         errores: errors.length + result.errors.length,
-        contactos: contactos.slice(0, 10).map(c => ({
+        contactos: contactosVerificados.slice(0, 10).map(c => ({
           nombre: c.nombre,
           empresa: c.empresa,
-          telefono: c.telefono,
-          telefono_usado: c.telefono_usado
+          telefono: c.telefono
         })), // Primeros 10 como muestra
+        contactos_rechazados: contactosRechazados.slice(0, 10), // Primeros 10 rechazados
         detalles_errores: [...errors, ...result.errors].slice(0, 10) // Primeros 10 errores para debugging
       }
     });

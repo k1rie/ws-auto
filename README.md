@@ -23,6 +23,7 @@ npm run dev
 - ✅ CORS habilitado para uso desde frontend
 - ✅ Dockerizado y listo para producción
 - ✅ Health check endpoint
+- ✅ Verificación automática de números de WhatsApp antes de agregar contactos (usando APIs externas)
 
 ## Requisitos
 
@@ -87,6 +88,8 @@ npm start
 
 - `PORT`: Puerto del servidor (por defecto: 3000)
 - `NODE_ENV`: `production`
+
+**📖 Ver [VERIFICACION_NUMEROS.md](./VERIFICACION_NUMEROS.md) para más información sobre la verificación de números.**
 
 ### Notas Importantes
 

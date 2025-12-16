@@ -208,8 +208,20 @@ class MensajeriaService {
             }
 
           } catch (error) {
-            console.error(`❌ Error enviando mensaje a ${contacto.telefono}:`, error.message);
-            await updateContactoEstado(contacto.id, 'error', error.message, conexion.id);
+            // Detectar errores específicos de WhatsApp
+            let errorMessage = error.message;
+            let errorType = 'error';
+            
+            // Error "No LID for user" - número no registrado en WhatsApp
+            if (error.message && error.message.includes('No LID for user')) {
+              errorMessage = 'Número no registrado en WhatsApp o no existe';
+              errorType = 'numero_no_registrado';
+              console.error(`❌ Error enviando mensaje a ${telefonoAUsar}: ${errorMessage}`);
+            } else {
+              console.error(`❌ Error enviando mensaje a ${telefonoAUsar}:`, error.message);
+            }
+            
+            await updateContactoEstado(contacto.id, errorType, errorMessage, conexion.id);
             contactosError++;
 
             // Remover de la lista de pendientes
@@ -318,6 +330,23 @@ class MensajeriaService {
     return {
       isRunning: this.isRunning,
       hasActiveBatch: !!this.currentBatch
+    };
+  }
+
+  /**
+   * Fuerza el procesamiento inmediato de mensajes pendientes
+   * Útil cuando se actualizan números en la base de datos y se quiere procesar de inmediato
+   */
+  async forceProcess() {
+    if (this.currentBatch) {
+      throw new Error('Ya hay un procesamiento en curso. Por favor espera a que termine.');
+    }
+
+    console.log('🔄 Forzando procesamiento inmediato de mensajes...');
+    await this.procesarEnvio();
+    return {
+      success: true,
+      message: 'Procesamiento completado'
     };
   }
 }

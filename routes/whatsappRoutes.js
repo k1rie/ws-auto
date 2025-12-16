@@ -376,5 +376,37 @@ router.post('/reset-sockets', async (req, res) => {
   }
 });
 
+// Obtener información de chats y respuestas para todos los números conectados
+router.get('/chats-responses', async (req, res) => {
+  try {
+    const { limit } = req.query;
+    const limitMensajes = limit ? parseInt(limit) : 100;
+    
+    if (isNaN(limitMensajes) || limitMensajes < 1 || limitMensajes > 500) {
+      return res.status(400).json({
+        success: false,
+        error: 'El parámetro limit debe ser un número entre 1 y 500'
+      });
+    }
+
+    const resultados = await whatsappController.getChatsWithResponses(limitMensajes);
+    
+    res.json({
+      success: true,
+      message: `Información de chats obtenida para ${resultados.length} número(s) conectado(s)`,
+      data: {
+        totalNumeros: resultados.length,
+        limitMensajesPorChat: limitMensajes,
+        numeros: resultados
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 export default router;
 

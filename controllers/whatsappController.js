@@ -335,16 +335,28 @@ class WhatsAppController {
     // Formatear número (agregar código de país si no está presente)
     const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
     
-    // Enviar mensaje
-    const result = await client.sendMessage(chatId, message);
-    
-    return {
-      id: result.id._serialized,
-      to: chatId,
-      message: message,
-      timestamp: result.timestamp,
-      whatsappId
-    };
+    try {
+      // Enviar mensaje
+      const result = await client.sendMessage(chatId, message);
+      
+      return {
+        id: result.id._serialized,
+        to: chatId,
+        message: message,
+        timestamp: result.timestamp,
+        whatsappId
+      };
+    } catch (error) {
+      // Detectar errores específicos de WhatsApp y proporcionar mensajes más claros
+      const errorMessage = error.message || error.toString();
+      
+      if (errorMessage.includes('No LID for user')) {
+        throw new Error(`Número ${number} no está registrado en WhatsApp o no existe. Error: No LID for user`);
+      }
+      
+      // Re-lanzar el error original si no es uno de los casos conocidos
+      throw error;
+    }
   }
 
   // Obtener cliente por whatsappId
@@ -604,6 +616,154 @@ class WhatsAppController {
     } catch (error) {
       console.error(`Error cerrando cliente ${whatsappId} automáticamente:`, error);
     }
+  }
+
+  /**
+   * Obtiene información de chats y respuestas para todos los números conectados
+   * Retorna información sobre mensajes enviados y sus respuestas
+   * @param {number} limitMensajes - Límite de mensajes a obtener por chat (default: 100)
+   */
+  async getChatsWithResponses(limitMensajes = 100) {
+    const resultados = [];
+    
+    // Obtener todos los clientes conectados
+    for (const [whatsappId, client] of this.clients.entries()) {
+      try {
+        // Verificar que el cliente esté listo
+        const status = await this.getStatus(whatsappId);
+        if (!status.ready) {
+          console.log(`⚠️  Cliente ${whatsappId} no está listo, saltando...`);
+          continue;
+        }
+
+        // Obtener información del cliente
+        const info = await client.info;
+        if (!info) {
+          continue;
+        }
+
+        const numeroEnvio = info.wid?.user || whatsappId;
+        const chatsInfo = [];
+
+        try {
+          // Obtener todos los chats
+          const chats = await client.getChats();
+          console.log(`📱 Revisando ${chats.length} chats para ${numeroEnvio}...`);
+
+          // Procesar cada chat
+          for (const chat of chats) {
+            try {
+              // Obtener mensajes del chat
+              const messages = await chat.fetchMessages({ limit: limitMensajes });
+              
+              // Filtrar solo mensajes enviados por este cliente
+              const mensajesEnviados = messages.filter(msg => msg.fromMe === true);
+              
+              if (mensajesEnviados.length === 0) {
+                continue; // No hay mensajes enviados en este chat
+              }
+
+              // Para cada mensaje enviado, buscar si hay respuesta
+              for (const mensajeEnviado of mensajesEnviados) {
+                const timestampEnvio = mensajeEnviado.timestamp * 1000; // Convertir a milisegundos
+                
+                // Buscar respuestas (mensajes posteriores que no sean fromMe)
+                const mensajesPosteriores = messages.filter(msg => 
+                  msg.timestamp * 1000 > timestampEnvio && 
+                  msg.fromMe === false
+                );
+                
+                // Ordenar por timestamp para obtener la primera respuesta
+                mensajesPosteriores.sort((a, b) => a.timestamp - b.timestamp);
+                
+                const primeraRespuesta = mensajesPosteriores.length > 0 ? mensajesPosteriores[0] : null;
+                
+                // Extraer número del contacto (remover @c.us si está presente)
+                let numeroContacto = chat.id._serialized || chat.id;
+                if (typeof numeroContacto === 'string' && numeroContacto.includes('@c.us')) {
+                  numeroContacto = numeroContacto.split('@')[0];
+                } else if (typeof numeroContacto === 'object' && numeroContacto.user) {
+                  numeroContacto = numeroContacto.user;
+                }
+                
+                // Obtener nombre del contacto si está disponible
+                const nombreContacto = chat.name || chat.pushname || numeroContacto;
+
+                // Obtener el contenido del mensaje enviado
+                let mensajeEnviadoTexto = '[Mensaje multimedia]';
+                if (mensajeEnviado.body) {
+                  mensajeEnviadoTexto = mensajeEnviado.body;
+                } else if (mensajeEnviado.caption) {
+                  mensajeEnviadoTexto = mensajeEnviado.caption;
+                } else if (mensajeEnviado.type) {
+                  mensajeEnviadoTexto = `[${mensajeEnviado.type}]`;
+                }
+
+                // Obtener el contenido de la respuesta si existe
+                let mensajeRespuestaTexto = null;
+                if (primeraRespuesta) {
+                  if (primeraRespuesta.body) {
+                    mensajeRespuestaTexto = primeraRespuesta.body;
+                  } else if (primeraRespuesta.caption) {
+                    mensajeRespuestaTexto = primeraRespuesta.caption;
+                  } else if (primeraRespuesta.type) {
+                    mensajeRespuestaTexto = `[${primeraRespuesta.type}]`;
+                  } else {
+                    mensajeRespuestaTexto = '[Mensaje multimedia]';
+                  }
+                }
+
+                const chatInfo = {
+                  numeroEnvio: numeroEnvio,
+                  numeroContacto: numeroContacto,
+                  nombreContacto: nombreContacto,
+                  mensajeEnviado: mensajeEnviadoTexto,
+                  fechaEnvio: new Date(timestampEnvio).toISOString(),
+                  timestampEnvio: timestampEnvio,
+                  contesto: primeraRespuesta !== null,
+                  mensajeRespuesta: mensajeRespuestaTexto,
+                  fechaRespuesta: primeraRespuesta ? new Date(primeraRespuesta.timestamp * 1000).toISOString() : null,
+                  timestampRespuesta: primeraRespuesta ? primeraRespuesta.timestamp * 1000 : null,
+                  chatId: chat.id._serialized || (typeof chat.id === 'object' ? JSON.stringify(chat.id) : chat.id)
+                };
+
+                chatsInfo.push(chatInfo);
+              }
+            } catch (chatError) {
+              console.error(`❌ Error procesando chat para ${numeroEnvio}:`, chatError.message);
+              // Continuar con el siguiente chat
+            }
+          }
+
+          resultados.push({
+            whatsappId: numeroEnvio,
+            nombreUsuario: info.pushname || numeroEnvio,
+            totalChats: chats.length,
+            chatsConMensajesEnviados: chatsInfo.length,
+            chats: chatsInfo
+          });
+
+        } catch (error) {
+          console.error(`❌ Error obteniendo chats para ${numeroEnvio}:`, error.message);
+          resultados.push({
+            whatsappId: numeroEnvio,
+            nombreUsuario: info.pushname || numeroEnvio,
+            error: error.message,
+            chats: []
+          });
+        }
+
+      } catch (error) {
+        console.error(`❌ Error procesando cliente ${whatsappId}:`, error.message);
+        resultados.push({
+          whatsappId: whatsappId,
+          error: error.message,
+          chats: []
+        });
+      }
+    }
+
+    return resultados;
   }
 }
 

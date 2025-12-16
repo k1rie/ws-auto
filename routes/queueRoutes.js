@@ -1,5 +1,5 @@
 import express from 'express';
-import { getQueue, initializeConnection, updatePriority } from '../controllers/queueController.js';
+import { getQueue, initializeConnection, updatePriority, forceProcess } from '../controllers/queueController.js';
 
 const router = express.Router();
 
@@ -11,6 +11,9 @@ router.post('/initialize', initializeConnection);
 
 // Actualizar prioridad
 router.post('/priority', updatePriority);
+
+// Forzar procesamiento inmediato de mensajes
+router.post('/force-process', forceProcess);
 
 export default router;
 
