@@ -18,13 +18,14 @@ class WhatsAppVerificationService {
     let client = null;
     let whatsappId = null;
 
+    // Importar whatsappController una vez
+    const whatsappController = (await import('../controllers/whatsappController.js')).default;
+
     // Buscar cualquier conexión activa con socket listo (sin importar la fase)
     for (const conexion of conexionesActivas) {
       const socket = conexionesService.getSocketByWhatsAppId(conexion.whatsapp_id);
       if (socket) {
         try {
-          // Importar whatsappController dinámicamente para evitar dependencias circulares
-          const whatsappController = (await import('../controllers/whatsappController.js')).default;
           const status = await whatsappController.getStatus(conexion.whatsapp_id);
           
           if (status.ready) {
@@ -34,6 +35,7 @@ class WhatsAppVerificationService {
             break;
           }
         } catch (e) {
+          console.error(`Error verificando conexión ${conexion.whatsapp_id}:`, e.message);
           // Continuar con la siguiente conexión
           continue;
         }
@@ -41,6 +43,21 @@ class WhatsAppVerificationService {
     }
 
     if (!client) {
+      // Intentar obtener más información para debugging
+      console.log(`❌ No se encontró cliente disponible. Información de debugging:`);
+      console.log(`   - Conexiones en BD: ${conexionesActivas.length}`);
+      for (const conexion of conexionesActivas) {
+        const socket = conexionesService.getSocketByWhatsAppId(conexion.whatsapp_id);
+        console.log(`   - ${conexion.whatsapp_id}: socket=${socket ? '✅' : '❌'}`);
+        if (socket) {
+          try {
+            const status = await whatsappController.getStatus(conexion.whatsapp_id);
+            console.log(`     Estado: ready=${status.ready}, message=${status.message}`);
+          } catch (e) {
+            console.log(`     Error obteniendo estado: ${e.message}`);
+          }
+        }
+      }
       throw new Error('No hay conexión activa de WhatsApp disponible para verificar números');
     }
 
@@ -134,25 +151,56 @@ class WhatsAppVerificationService {
       // Obtener todas las conexiones activas (sin importar la fase)
       const conexionesActivas = await getConexionesActivas();
       
+      console.log(`🔍 Verificando disponibilidad: ${conexionesActivas.length} conexión(es) activa(s) en BD`);
+      
+      if (conexionesActivas.length === 0) {
+        console.log(`❌ No hay conexiones activas en la base de datos`);
+        return false;
+      }
+      
+      // Obtener todos los sockets registrados para debugging
+      const whatsappController = (await import('../controllers/whatsappController.js')).default;
+      
       for (const conexion of conexionesActivas) {
-        const socket = conexionesService.getSocketByWhatsAppId(conexion.whatsapp_id);
-        if (socket) {
-          try {
-            const whatsappController = (await import('../controllers/whatsappController.js')).default;
-            const status = await whatsappController.getStatus(conexion.whatsapp_id);
-            if (status.ready) {
-              console.log(`✅ Conexión disponible para verificación: ${conexion.whatsapp_id} (fase ${conexion.fase_actual || 'N/A'})`);
-              return true;
-            }
-          } catch (e) {
-            continue;
+        console.log(`🔍 Verificando conexión: ${conexion.whatsapp_id} (fase ${conexion.fase_actual || 'N/A'})`);
+        
+        // Intentar obtener socket con el whatsapp_id de la BD
+        let socket = conexionesService.getSocketByWhatsAppId(conexion.whatsapp_id);
+        
+        if (!socket) {
+          console.log(`   ⚠️  No se encontró socket registrado para ${conexion.whatsapp_id}`);
+          // Continuar con la siguiente conexión
+          continue;
+        }
+        
+        console.log(`   ✅ Socket encontrado para ${conexion.whatsapp_id}`);
+        
+        try {
+          const status = await whatsappController.getStatus(conexion.whatsapp_id);
+          console.log(`   📊 Estado: ready=${status.ready}, message=${status.message}`);
+          
+          if (status.ready) {
+            console.log(`✅ Conexión disponible para verificación: ${conexion.whatsapp_id} (fase ${conexion.fase_actual || 'N/A'})`);
+            return true;
+          } else {
+            console.log(`   ⚠️  Conexión ${conexion.whatsapp_id} no está lista: ${status.message}`);
           }
+        } catch (e) {
+          console.error(`   ❌ Error verificando estado de ${conexion.whatsapp_id}:`, e.message);
+          continue;
         }
       }
+      
       console.log(`❌ No hay conexiones activas disponibles para verificación`);
+      console.log(`💡 Asegúrate de que:`);
+      console.log(`   1. El número esté conectado y el QR haya sido escaneado`);
+      console.log(`   2. El cliente esté en estado 'ready'`);
+      console.log(`   3. El socket esté registrado correctamente`);
+      
       return false;
     } catch (error) {
-      console.error(`Error verificando disponibilidad:`, error.message);
+      console.error(`❌ Error verificando disponibilidad:`, error.message);
+      console.error(error.stack);
       return false;
     }
   }
