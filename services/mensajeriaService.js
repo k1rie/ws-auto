@@ -93,18 +93,7 @@ class MensajeriaService {
         
         if (mensajesRestantes <= 0) {
           console.log(`⏸️  Conexión ${conexion.whatsapp_id} ha alcanzado su límite diario (${conexion.mensajes_enviados_hoy}/${faseConfig.mensajes_por_numero_por_dia})`);
-          
-          // Si tiene socket activo, cerrarlo para liberar recursos
-          if (socket) {
-            console.log(`🔒 Cerrando socket de ${conexion.whatsapp_id} por haber alcanzado el límite diario...`);
-            try {
-              await whatsappController.logout(conexion.whatsapp_id);
-              console.log(`✅ Socket de ${conexion.whatsapp_id} cerrado exitosamente`);
-            } catch (error) {
-              console.error(`❌ Error cerrando socket de ${conexion.whatsapp_id}:`, error.message);
-            }
-          }
-          
+          // No cerrar la conexión, solo saltarla para este lote
           continue;
         }
 
@@ -265,17 +254,7 @@ class MensajeriaService {
 
       // Verificar límite diario
       if (updatedConexion.mensajes_enviados_hoy >= faseConfig.mensajes_por_numero_por_dia) {
-        // Si alcanzó el límite y tiene socket activo, cerrarlo para liberar recursos
-        const socket = conexionesService.getSocketByWhatsAppId(updatedConexion.whatsapp_id);
-        if (socket) {
-          console.log(`🔒 Conexión ${updatedConexion.whatsapp_id} alcanzó su límite diario (${updatedConexion.mensajes_enviados_hoy}/${faseConfig.mensajes_por_numero_por_dia}). Cerrando socket...`);
-          try {
-            await whatsappController.logout(updatedConexion.whatsapp_id);
-            console.log(`✅ Socket de ${updatedConexion.whatsapp_id} cerrado exitosamente`);
-          } catch (error) {
-            console.error(`❌ Error cerrando socket de ${updatedConexion.whatsapp_id}:`, error.message);
-          }
-        }
+        // No cerrar la conexión, solo saltarla (puede usarse para verificación)
         continue;
       }
 
