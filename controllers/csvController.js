@@ -198,33 +198,23 @@ export async function uploadCSV(req, res) {
     const contactosVerificados = [];
     const contactosRechazados = [];
 
-    // Verificar si hay una conexión disponible
+    // Verificar si hay una conexión disponible (OBLIGATORIO)
     const hayConexionDisponible = await whatsappVerificationService.isAvailable();
     
     if (!hayConexionDisponible) {
-      console.log(`⚠️  No hay conexión activa de WhatsApp disponible. Los contactos se guardarán sin verificación.`);
-      console.log(`💡 Asegúrate de tener al menos una conexión activa de WhatsApp para verificar números.`);
-      
-      // Si no está configurado, guardar todos los contactos sin verificar
-      const result = await createContactosBulk(conexionId, contactos);
+      console.log(`❌ No hay conexión activa de WhatsApp disponible. No se pueden subir contactos sin verificación.`);
       
       // Limpiar archivo temporal
       fs.unlinkSync(filePath);
       
-      return res.json({
-        success: true,
-        message: 'CSV procesado exitosamente (sin verificación - no hay conexión activa)',
+      return res.status(400).json({
+        success: false,
+        error: 'No se puede procesar el CSV sin una conexión activa de WhatsApp',
+        message: 'Se requiere al menos una conexión activa de WhatsApp para verificar los números antes de agregarlos. Por favor, conecta al menos un número de WhatsApp antes de subir contactos.',
         data: {
           total: contactos.length + errors.length,
-          guardados: result.inserted,
-          errores: errors.length + result.errors.length,
-          contactos: contactos.slice(0, 10).map(c => ({
-            nombre: c.nombre,
-            empresa: c.empresa,
-            telefono: c.telefono
-          })),
-          detalles_errores: [...errors, ...result.errors].slice(0, 10),
-          advertencia: 'No se pudo verificar números porque no hay conexión activa de WhatsApp disponible.'
+          contactos_procesados: contactos.length,
+          errores: errors.length
         }
       });
     }

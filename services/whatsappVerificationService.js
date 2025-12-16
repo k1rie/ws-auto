@@ -12,13 +12,13 @@ class WhatsAppVerificationService {
    * @returns {Promise<boolean>} - true si está registrado, false si no
    */
   async verifyNumber(phoneNumber) {
-    // Obtener una conexión activa disponible
+    // Obtener todas las conexiones activas (sin importar la fase, solo verifica, no envía mensajes)
     const conexionesActivas = await getConexionesActivas();
     
     let client = null;
     let whatsappId = null;
 
-    // Buscar una conexión activa con socket listo
+    // Buscar cualquier conexión activa con socket listo (sin importar la fase)
     for (const conexion of conexionesActivas) {
       const socket = conexionesService.getSocketByWhatsAppId(conexion.whatsapp_id);
       if (socket) {
@@ -30,6 +30,7 @@ class WhatsAppVerificationService {
           if (status.ready) {
             client = socket;
             whatsappId = conexion.whatsapp_id;
+            console.log(`✅ Usando conexión ${whatsappId} (fase ${conexion.fase_actual || 'N/A'}) para verificar números`);
             break;
           }
         } catch (e) {
@@ -126,9 +127,11 @@ class WhatsAppVerificationService {
 
   /**
    * Verifica si hay una conexión disponible para verificar
+   * Usa cualquier conexión activa, sin importar la fase (solo verifica, no envía mensajes)
    */
   async isAvailable() {
     try {
+      // Obtener todas las conexiones activas (sin importar la fase)
       const conexionesActivas = await getConexionesActivas();
       
       for (const conexion of conexionesActivas) {
@@ -138,6 +141,7 @@ class WhatsAppVerificationService {
             const whatsappController = (await import('../controllers/whatsappController.js')).default;
             const status = await whatsappController.getStatus(conexion.whatsapp_id);
             if (status.ready) {
+              console.log(`✅ Conexión disponible para verificación: ${conexion.whatsapp_id} (fase ${conexion.fase_actual || 'N/A'})`);
               return true;
             }
           } catch (e) {
@@ -145,8 +149,10 @@ class WhatsAppVerificationService {
           }
         }
       }
+      console.log(`❌ No hay conexiones activas disponibles para verificación`);
       return false;
     } catch (error) {
+      console.error(`Error verificando disponibilidad:`, error.message);
       return false;
     }
   }
