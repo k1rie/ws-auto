@@ -26,9 +26,23 @@ class WhatsAppVerificationService {
       const socket = conexionesService.getSocketByWhatsAppId(conexion.whatsapp_id);
       if (socket) {
         try {
-          const status = await whatsappController.getStatus(conexion.whatsapp_id);
+          // Verificar directamente con el socket si está listo
+          let isReady = false;
+          try {
+            const info = await socket.info;
+            isReady = !!info;
+          } catch (socketError) {
+            // Si falla, intentar con getStatus como fallback
+            try {
+              const status = await whatsappController.getStatus(conexion.whatsapp_id);
+              isReady = status.ready;
+            } catch (statusError) {
+              console.error(`Error verificando estado de ${conexion.whatsapp_id}:`, statusError.message);
+              continue;
+            }
+          }
           
-          if (status.ready) {
+          if (isReady) {
             client = socket;
             whatsappId = conexion.whatsapp_id;
             console.log(`✅ Usando conexión ${whatsappId} (fase ${conexion.fase_actual || 'N/A'}) para verificar números`);
@@ -176,14 +190,25 @@ class WhatsAppVerificationService {
         console.log(`   ✅ Socket encontrado para ${conexion.whatsapp_id}`);
         
         try {
-          const status = await whatsappController.getStatus(conexion.whatsapp_id);
-          console.log(`   📊 Estado: ready=${status.ready}, message=${status.message}`);
+          // Verificar directamente con el socket si tiene info disponible
+          let isReady = false;
+          try {
+            const info = await socket.info;
+            isReady = !!info;
+            console.log(`   📊 Estado del socket: ready=${isReady}`);
+          } catch (socketError) {
+            console.log(`   ⚠️  Error obteniendo info del socket: ${socketError.message}`);
+            // Intentar con getStatus como fallback
+            const status = await whatsappController.getStatus(conexion.whatsapp_id);
+            isReady = status.ready;
+            console.log(`   📊 Estado (fallback): ready=${isReady}, message=${status.message}`);
+          }
           
-          if (status.ready) {
+          if (isReady) {
             console.log(`✅ Conexión disponible para verificación: ${conexion.whatsapp_id} (fase ${conexion.fase_actual || 'N/A'})`);
             return true;
           } else {
-            console.log(`   ⚠️  Conexión ${conexion.whatsapp_id} no está lista: ${status.message}`);
+            console.log(`   ⚠️  Conexión ${conexion.whatsapp_id} no está lista`);
           }
         } catch (e) {
           console.error(`   ❌ Error verificando estado de ${conexion.whatsapp_id}:`, e.message);
