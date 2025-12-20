@@ -152,14 +152,15 @@ class MensajeriaService {
             await this.sleep(delay);
           }
 
+          // Intentar usar cualquiera de los 3 números disponibles
+          // Prioridad: telefono (principal) -> telefono_mobile -> telefono_corporate -> telefono_other
+          // Definir antes del try para que esté disponible en el catch
+          let telefonoAUsar = contacto.telefono || 
+                             contacto.telefono_mobile || 
+                             contacto.telefono_corporate || 
+                             contacto.telefono_other;
+
           try {
-            // Intentar usar cualquiera de los 3 números disponibles
-            // Prioridad: telefono (principal) -> telefono_mobile -> telefono_corporate -> telefono_other
-            let telefonoAUsar = contacto.telefono || 
-                               contacto.telefono_mobile || 
-                               contacto.telefono_corporate || 
-                               contacto.telefono_other;
-            
             if (!telefonoAUsar) {
               throw new Error('No hay teléfono disponible');
             }
@@ -201,13 +202,16 @@ class MensajeriaService {
             let errorMessage = error.message;
             let errorType = 'error';
             
+            // Usar telefonoAUsar si está disponible, sino usar un valor por defecto
+            const telefonoParaLog = telefonoAUsar || contacto.id || 'desconocido';
+            
             // Error "No LID for user" - número no registrado en WhatsApp
             if (error.message && error.message.includes('No LID for user')) {
               errorMessage = 'Número no registrado en WhatsApp o no existe';
               errorType = 'numero_no_registrado';
-              console.error(`❌ Error enviando mensaje a ${telefonoAUsar}: ${errorMessage}`);
+              console.error(`❌ Error enviando mensaje a ${telefonoParaLog}: ${errorMessage}`);
             } else {
-              console.error(`❌ Error enviando mensaje a ${telefonoAUsar}:`, error.message);
+              console.error(`❌ Error enviando mensaje a ${telefonoParaLog}:`, error.message);
             }
             
             await updateContactoEstado(contacto.id, errorType, errorMessage, conexion.id);
