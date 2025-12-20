@@ -379,7 +379,7 @@ router.post('/reset-sockets', async (req, res) => {
 // Obtener información de chats y respuestas para todos los números conectados
 router.get('/chats-responses', async (req, res) => {
   try {
-    const { limit } = req.query;
+    const { limit, fechaInicio, fechaFin } = req.query;
     const limitMensajes = limit ? parseInt(limit) : 100;
     
     if (isNaN(limitMensajes) || limitMensajes < 1 || limitMensajes > 500) {
@@ -389,7 +389,47 @@ router.get('/chats-responses', async (req, res) => {
       });
     }
 
-    const resultados = await whatsappController.getChatsWithResponses(limitMensajes);
+    // Validar y parsear fechas
+    let fechaInicioDate = null;
+    let fechaFinDate = null;
+    
+    if (fechaInicio) {
+      fechaInicioDate = new Date(fechaInicio);
+      if (isNaN(fechaInicioDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          error: 'El parámetro fechaInicio debe ser una fecha válida (formato: YYYY-MM-DD o ISO 8601)'
+        });
+      }
+    }
+    
+    if (fechaFin) {
+      fechaFinDate = new Date(fechaFin);
+      if (isNaN(fechaFinDate.getTime())) {
+        return res.status(400).json({
+          success: false,
+          error: 'El parámetro fechaFin debe ser una fecha válida (formato: YYYY-MM-DD o ISO 8601)'
+        });
+      }
+    }
+    
+    // Validar que fechaInicio sea anterior a fechaFin
+    if (fechaInicioDate && fechaFinDate && fechaInicioDate > fechaFinDate) {
+      return res.status(400).json({
+        success: false,
+        error: 'La fecha de inicio debe ser anterior o igual a la fecha de fin'
+      });
+    }
+
+    const resultados = await whatsappController.getChatsWithResponses(
+      limitMensajes, 
+      fechaInicioDate, 
+      fechaFinDate
+    );
+    
+    const filtros = {};
+    if (fechaInicioDate) filtros.fechaInicio = fechaInicioDate.toISOString().split('T')[0];
+    if (fechaFinDate) filtros.fechaFin = fechaFinDate.toISOString().split('T')[0];
     
     res.json({
       success: true,
@@ -397,6 +437,7 @@ router.get('/chats-responses', async (req, res) => {
       data: {
         totalNumeros: resultados.length,
         limitMensajesPorChat: limitMensajes,
+        filtros: Object.keys(filtros).length > 0 ? filtros : null,
         numeros: resultados
       }
     });

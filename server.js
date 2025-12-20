@@ -91,7 +91,7 @@ const server = app.listen(PORT, async () => {
   console.log(`   POST http://localhost:${PORT}/api/whatsapp/send`);
   console.log(`   POST http://localhost:${PORT}/api/whatsapp/logout`);
   console.log(`   POST http://localhost:${PORT}/api/whatsapp/reset-sockets (🔄 Reiniciar todos los sockets)`);
-  console.log(`   GET  http://localhost:${PORT}/api/whatsapp/chats-responses (💬 Obtener chats y respuestas)`);
+  console.log(`   GET  http://localhost:${PORT}/api/whatsapp/chats-responses (💬 Obtener chats y respuestas - ?fechaInicio=YYYY-MM-DD&fechaFin=YYYY-MM-DD&limit=100)`);
   console.log(`   POST http://localhost:${PORT}/api/upload-csv`);
   console.log(`   GET  http://localhost:${PORT}/api/conexiones`);
   console.log(`   POST http://localhost:${PORT}/api/conexiones (📝 Crear conexión en BD)`);

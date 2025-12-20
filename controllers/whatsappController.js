@@ -622,9 +622,26 @@ class WhatsAppController {
    * Obtiene información de chats y respuestas para todos los números conectados
    * Retorna información sobre mensajes enviados y sus respuestas
    * @param {number} limitMensajes - Límite de mensajes a obtener por chat (default: 100)
+   * @param {Date|null} fechaInicio - Fecha de inicio para filtrar mensajes (opcional)
+   * @param {Date|null} fechaFin - Fecha de fin para filtrar mensajes (opcional)
    */
-  async getChatsWithResponses(limitMensajes = 100) {
+  async getChatsWithResponses(limitMensajes = 100, fechaInicio = null, fechaFin = null) {
     const resultados = [];
+    
+    // Convertir fechas a timestamps si se proporcionan
+    let timestampInicio = null;
+    let timestampFin = null;
+    
+    if (fechaInicio) {
+      timestampInicio = fechaInicio.getTime();
+    }
+    
+    if (fechaFin) {
+      // Establecer la hora al final del día (23:59:59.999)
+      const finDelDia = new Date(fechaFin);
+      finDelDia.setHours(23, 59, 59, 999);
+      timestampFin = finDelDia.getTime();
+    }
     
     // Obtener todos los clientes conectados
     for (const [whatsappId, client] of this.clients.entries()) {
@@ -657,10 +674,27 @@ class WhatsAppController {
               const messages = await chat.fetchMessages({ limit: limitMensajes });
               
               // Filtrar solo mensajes enviados por este cliente
-              const mensajesEnviados = messages.filter(msg => msg.fromMe === true);
+              let mensajesEnviados = messages.filter(msg => msg.fromMe === true);
+              
+              // Filtrar por rango de fechas si se proporciona
+              if (timestampInicio || timestampFin) {
+                mensajesEnviados = mensajesEnviados.filter(msg => {
+                  const timestampMsg = msg.timestamp * 1000; // Convertir a milisegundos
+                  
+                  if (timestampInicio && timestampMsg < timestampInicio) {
+                    return false;
+                  }
+                  
+                  if (timestampFin && timestampMsg > timestampFin) {
+                    return false;
+                  }
+                  
+                  return true;
+                });
+              }
               
               if (mensajesEnviados.length === 0) {
-                continue; // No hay mensajes enviados en este chat
+                continue; // No hay mensajes enviados en este chat dentro del rango
               }
 
               // Para cada mensaje enviado, buscar si hay respuesta
