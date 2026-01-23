@@ -1,6 +1,6 @@
 import { getAllConexiones } from '../models/conexionesModel.js';
 import conexionesService from '../services/conexionesService.js';
-import whatsappController from './whatsappController.js';
+import baileysController from './baileysController.js';
 
 /**
  * Crea una conexión en la BD (sin inicializar socket)
@@ -101,22 +101,22 @@ export async function registerDevice(req, res) {
     }
 
     // Verificar si ya está conectado
-    const existingClient = whatsappController.getClient(whatsappId);
-    if (existingClient) {
-      const status = await whatsappController.getStatus(whatsappId);
+    const existingSocket = baileysController.getSocket(whatsappId);
+    if (existingSocket) {
+      const status = await baileysController.getStatus(whatsappId);
       if (status.ready) {
         // Si ya está conectado, obtener los datos y cerrar
         try {
-          const client = whatsappController.getClient(whatsappId);
-          const info = await client.info;
-          const numeroReal = info?.wid?.user || whatsappId;
-          const nombreReal = info?.pushname || info?.wid?.user || nombreUsuario || whatsappId;
+          const socket = baileysController.getSocket(whatsappId);
+          const user = socket?.user;
+          const numeroReal = user?.id?.split('@')[0] || whatsappId;
+          const nombreReal = user?.name || numeroReal || nombreUsuario || whatsappId;
           
           // Guardar en BD
           await conexionesService.createOrUpdateConexion(numeroReal, nombreReal);
           
           // Cerrar el cliente
-          await whatsappController.logout(whatsappId);
+          await baileysController.logout(whatsappId);
           
           return res.json({
             success: true,
@@ -138,7 +138,7 @@ export async function registerDevice(req, res) {
 
     // Inicializar cliente en modo registro (usa el límite de registro, no el de envío)
     try {
-      await whatsappController.initialize(whatsappId, nombreUsuario || whatsappId, false, true); // isRegistration = true
+      await baileysController.initialize(whatsappId, nombreUsuario || whatsappId, false, true); // isRegistration = true
     } catch (error) {
       if (error.message.includes('espacio disponible')) {
         return res.status(403).json({
@@ -150,24 +150,24 @@ export async function registerDevice(req, res) {
     }
 
     // Esperar a que se genere el QR (máximo 30 segundos)
-    const qr = await whatsappController.waitForQR(whatsappId, 30000, 1000);
+    const qr = await baileysController.waitForQR(whatsappId, 30000, 1000);
     
     if (!qr) {
       // Verificar si ya está conectado
-      const status = await whatsappController.getStatus(whatsappId);
+      const status = await baileysController.getStatus(whatsappId);
       if (status.ready) {
         // Ya está conectado, obtener datos y cerrar
         try {
-          const client = whatsappController.getClient(whatsappId);
-          const info = await client.info;
-          const numeroReal = info?.wid?.user || whatsappId;
-          const nombreReal = info?.pushname || info?.wid?.user || nombreUsuario || whatsappId;
+          const socket = baileysController.getSocket(whatsappId);
+          const user = socket?.user;
+          const numeroReal = user?.id?.split('@')[0] || whatsappId;
+          const nombreReal = user?.name || numeroReal || nombreUsuario || whatsappId;
           
           // Guardar en BD
           await conexionesService.createOrUpdateConexion(numeroReal, nombreReal);
           
           // Cerrar el cliente
-          await whatsappController.logout(whatsappId);
+          await baileysController.logout(whatsappId);
           
           return res.json({
             success: true,
@@ -196,7 +196,7 @@ export async function registerDevice(req, res) {
     }
 
     // Marcar esta conexión para que se cierre automáticamente después de registrar
-    whatsappController.autoCloseAfterRegister.add(whatsappId);
+    baileysController.markForAutoClose(whatsappId);
     
     // Retornar QR - el cliente se cerrará automáticamente cuando se conecte (evento ready)
     res.json({

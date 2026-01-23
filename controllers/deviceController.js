@@ -2,7 +2,7 @@ import { getConexionByWhatsAppId, checkAndUpdateFase } from '../models/conexione
 import { getFaseConfig } from '../models/fasesModel.js';
 import { getContactosByConexion, countContactosPendientesByConexion } from '../models/contactosModel.js';
 import conexionesService from '../services/conexionesService.js';
-import whatsappController from './whatsappController.js';
+import baileysController from './baileysController.js';
 
 /**
  * Obtiene información detallada de un dispositivo/conexión
@@ -34,18 +34,18 @@ export async function getDeviceInfo(req, res) {
     const faseConfig = await getFaseConfig(conexion.fase_actual);
 
     // Obtener información del socket
-    const client = whatsappController.getClient(whatsappId);
-    const hasSocket = client !== null;
-    const status = await whatsappController.getStatus(whatsappId);
+    const socket = baileysController.getSocket(whatsappId);
+    const hasSocket = socket !== null;
+    const status = await baileysController.getStatus(whatsappId);
     
     // Obtener QR si está disponible (esperar un poco si está inicializando)
     let qrCode = null;
     try {
-      qrCode = whatsappController.getQRCode(whatsappId);
+      qrCode = baileysController.getQRCode(whatsappId);
     } catch (e) {
       // Si no hay QR inmediatamente, esperar un poco
       try {
-        qrCode = await whatsappController.waitForQR(whatsappId, 5000, 500);
+        qrCode = await baileysController.waitForQR(whatsappId, 5000, 500);
       } catch (e2) {
         // No hay QR disponible
       }
@@ -150,9 +150,9 @@ export async function initializeDevice(req, res) {
     }
 
     // Verificar si ya está inicializado
-    const client = whatsappController.getClient(whatsappId);
+    const client = baileysController.getClient(whatsappId);
     if (client) {
-      const status = await whatsappController.getStatus(whatsappId);
+      const status = await baileysController.getStatus(whatsappId);
       return res.json({
         success: true,
         message: 'Dispositivo ya está inicializado',
@@ -164,7 +164,7 @@ export async function initializeDevice(req, res) {
     }
 
     // Inicializar
-    await whatsappController.initialize(whatsappId, nombreUsuario);
+    await baileysController.initialize(whatsappId, nombreUsuario);
 
     res.json({
       success: true,

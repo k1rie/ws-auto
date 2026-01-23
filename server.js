@@ -9,9 +9,12 @@ import contactosRoutes from './routes/contactosRoutes.js';
 import dashboardRoutes from './routes/dashboardRoutes.js';
 import queueRoutes from './routes/queueRoutes.js';
 import deviceRoutes from './routes/deviceRoutes.js';
-import whatsappController from './controllers/whatsappController.js';
+import hubspotRoutes from './routes/hubspotRoutes.js';
+import configuracionRoutes from './routes/configuracionRoutes.js';
+import baileysController from './controllers/baileysController.js';
 import mensajeriaService from './services/mensajeriaService.js';
 import { testConnection } from './config/database.js';
+import { ensureContactScheduleColumns } from './models/contactosModel.js';
 import { resetMensajesDiarios, updateFasesTodasConexiones } from './models/conexionesModel.js';
 import cron from 'node-cron';
 
@@ -34,14 +37,24 @@ app.use('/api/contactos', contactosRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/queue', queueRoutes);
 app.use('/api/device', deviceRoutes);
+app.use('/api', hubspotRoutes);
+app.use('/api/configuracion', configuracionRoutes);
 
 // Inicializar base de datos al arrancar
 async function initializeDatabase() {
   const connected = await testConnection();
   if (!connected) {
-    console.warn('⚠️  Advertencia: No se pudo conectar a la base de datos. Algunas funcionalidades pueden no estar disponibles.');
+    console.warn('[WARN] No se pudo conectar a la base de datos. Algunas funcionalidades pueden no estar disponibles.');
     return false;
   }
+
+  // Intentar asegurar columnas nuevas antes de arrancar mensajería
+  try {
+    await ensureContactScheduleColumns();
+  } catch (error) {
+    console.warn(`[WARN] No se pudieron asegurar columnas de programación en contactos: ${error.message}`);
+  }
+
   return true;
 }
 
@@ -49,15 +62,21 @@ async function initializeDatabase() {
 async function initializeMensajeria() {
   try {
     await mensajeriaService.start();
-    console.log('✅ Servicio de mensajería automática iniciado');
+    console.log('[INFO] Servicio de mensajería automática iniciado');
+    // Ejecutar un primer procesamiento inmediato (cron seguirá cada 5 min)
+    try {
+      await mensajeriaService.forceProcess();
+    } catch (e) {
+      // ignore
+    }
   } catch (error) {
-    console.error('❌ Error iniciando servicio de mensajería:', error);
+    console.error('[ERROR] Error iniciando servicio de mensajería:', error);
   }
 }
 
 // Configurar cron job para resetear mensajes diarios a medianoche
 cron.schedule('0 0 * * *', async () => {
-  console.log('🔄 Ejecutando reseteo diario de mensajes...');
+  console.log('[INFO] Ejecutando reseteo diario de mensajes...');
   try {
     await resetMensajesDiarios();
   } catch (error) {
@@ -69,7 +88,7 @@ cron.schedule('0 0 * * *', async () => {
 
 // Configurar cron job para actualizar fases de conexiones cada hora
 cron.schedule('0 * * * *', async () => {
-  console.log('🔄 Ejecutando actualización periódica de fases...');
+  console.log('[INFO] Ejecutando actualización periódica de fases...');
   try {
     await updateFasesTodasConexiones();
   } catch (error) {
@@ -79,31 +98,49 @@ cron.schedule('0 * * * *', async () => {
   timezone: 'America/Mexico_City' // Ajustar según tu zona horaria
 });
 
+// Envío automático: ejecutar cada 5 minutos vía CRON (no setInterval)
+cron.schedule('*/5 * * * *', async () => {
+  try {
+    // Si el servicio no está "habilitado", no procesar
+    if (!mensajeriaService.getStatus().isRunning) {
+      return;
+    }
+    await mensajeriaService.forceProcess();
+  } catch (error) {
+    // Puede fallar si ya hay un batch en curso; no es crítico
+    console.warn(`[WARN] Cron de envío: ${error.message}`);
+  }
+}, {
+  timezone: 'America/Mexico_City'
+});
+
 // Crear servidor HTTP
 const server = app.listen(PORT, async () => {
-  console.log(`🚀 Servidor API corriendo en puerto ${PORT}`);
-  console.log(`📚 Endpoints disponibles:`);
+  console.log(`[INFO] Servidor API corriendo en puerto ${PORT}`);
+  console.log('[INFO] Endpoints disponibles:');
   console.log(`   GET  http://localhost:${PORT}/health`);
-  console.log(`   POST http://localhost:${PORT}/api/whatsapp/connect (⭐ Recomendado: inicializa y obtiene QR)`);
+  console.log(`   POST http://localhost:${PORT}/api/whatsapp/connect (recomendado: inicializa y obtiene QR)`);
   console.log(`   GET  http://localhost:${PORT}/api/whatsapp/status?whatsappId=xxx`);
   console.log(`   GET  http://localhost:${PORT}/api/whatsapp/qr?whatsappId=xxx`);
   console.log(`   POST http://localhost:${PORT}/api/whatsapp/initialize`);
   console.log(`   POST http://localhost:${PORT}/api/whatsapp/send`);
   console.log(`   POST http://localhost:${PORT}/api/whatsapp/logout`);
-  console.log(`   POST http://localhost:${PORT}/api/whatsapp/reset-sockets (🔄 Reiniciar todos los sockets)`);
-  console.log(`   GET  http://localhost:${PORT}/api/whatsapp/chats-responses (💬 Obtener chats y respuestas - ?fechaInicio=YYYY-MM-DD&fechaFin=YYYY-MM-DD&limit=100)`);
+  console.log(`   POST http://localhost:${PORT}/api/whatsapp/reset-sockets (reiniciar todos los sockets)`);
+  console.log(`   GET  http://localhost:${PORT}/api/whatsapp/chats-responses (obtener chats y respuestas - ?fechaInicio=YYYY-MM-DD&fechaFin=YYYY-MM-DD&limit=100)`);
   console.log(`   POST http://localhost:${PORT}/api/upload-csv`);
   console.log(`   GET  http://localhost:${PORT}/api/conexiones`);
-  console.log(`   POST http://localhost:${PORT}/api/conexiones (📝 Crear conexión en BD)`);
-  console.log(`   POST http://localhost:${PORT}/api/conexiones/register (📱 Registrar dispositivo: QR → guardar → cerrar)`);
+  console.log(`   POST http://localhost:${PORT}/api/conexiones (crear conexión en BD)`);
+  console.log(`   POST http://localhost:${PORT}/api/conexiones/register (registrar dispositivo: QR -> guardar -> cerrar)`);
   console.log(`   GET  http://localhost:${PORT}/api/contactos?sessionId=xxx`);
-    console.log(`   GET  http://localhost:${PORT}/api/dashboard`);
-    console.log(`   GET  http://localhost:${PORT}/api/queue`);
-    console.log(`   POST http://localhost:${PORT}/api/queue/force-process (🔄 Forzar procesamiento inmediato)`);
-    console.log(`   GET  http://localhost:${PORT}/api/device/info?whatsappId=xxx`);
-  console.log(`\n📊 Configuración:`);
-  console.log(`   Máximo de conexiones para envío: ${process.env.MAX_CONEXIONES || 1}`);
-  console.log(`   Máximo de conexiones para registro: ${process.env.MAX_CONEXIONES_REGISTRO || 2}`);
+  console.log(`   GET  http://localhost:${PORT}/api/dashboard`);
+  console.log(`   GET  http://localhost:${PORT}/api/queue`);
+  console.log(`   POST http://localhost:${PORT}/api/queue/force-process (forzar procesamiento inmediato)`);
+  console.log(`   GET  http://localhost:${PORT}/api/device/info?whatsappId=xxx`);
+  console.log(`   POST http://localhost:${PORT}/api/import-hubspot/preview (confirmar cantidad antes de importar)`);
+  console.log(`   POST http://localhost:${PORT}/api/import-hubspot (importar lista de HubSpot con IA)`);
+  console.log('\n[INFO] Configuración:');
+  console.log(`   Max conexiones para envío: ${process.env.MAX_CONEXIONES || 1}`);
+  console.log(`   Max conexiones para registro: ${process.env.MAX_CONEXIONES_REGISTRO || 2}`);
   
   // Inicializar base de datos
   const dbConnected = await initializeDatabase();
@@ -113,7 +150,7 @@ const server = app.listen(PORT, async () => {
     await initializeMensajeria();
     
     // Actualizar fases de conexiones al iniciar el servidor
-    console.log('🔄 Actualizando fases de conexiones al iniciar...');
+    console.log('[INFO] Actualizando fases de conexiones al iniciar...');
     try {
       await updateFasesTodasConexiones();
     } catch (error) {
@@ -126,7 +163,7 @@ const server = app.listen(PORT, async () => {
 process.on('SIGTERM', () => {
   console.log('SIGTERM recibido, cerrando servidor...');
   mensajeriaService.stop();
-  whatsappController.destroy();
+  // Baileys no tiene método destroy, los sockets se cierran automáticamente
   server.close(() => {
     console.log('Servidor cerrado');
     process.exit(0);
@@ -136,7 +173,7 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => {
   console.log('SIGINT recibido, cerrando servidor...');
   mensajeriaService.stop();
-  whatsappController.destroy();
+  // Baileys no tiene método destroy, los sockets se cierran automáticamente
   server.close(() => {
     console.log('Servidor cerrado');
     process.exit(0);

@@ -76,7 +76,8 @@ export function isValidPhoneNumber(phone) {
 }
 
 /**
- * Formatea número para WhatsApp (agrega @c.us si no lo tiene)
+ * Formatea número para WhatsApp (agrega @s.whatsapp.net para Baileys)
+ * Baileys usa @s.whatsapp.net en lugar de @c.us
  */
 export function formatForWhatsApp(phone) {
   const formatted = formatPhoneNumber(phone);
@@ -84,12 +85,17 @@ export function formatForWhatsApp(phone) {
     return null;
   }
 
-  // Si ya incluye @c.us, retornarlo tal cual
-  if (formatted.includes('@c.us')) {
+  // Si ya incluye @s.whatsapp.net o @c.us, convertir a formato Baileys
+  if (formatted.includes('@s.whatsapp.net')) {
     return formatted;
   }
+  
+  if (formatted.includes('@c.us')) {
+    // Convertir de formato antiguo a nuevo
+    return formatted.replace('@c.us', '@s.whatsapp.net');
+  }
 
-  // Agregar @c.us
-  return `${formatted}@c.us`;
+  // Agregar @s.whatsapp.net (formato Baileys)
+  return `${formatted}@s.whatsapp.net`;
 }
 

@@ -2,7 +2,7 @@ import { getEstadisticasGenerales, getEstadisticasPorDia, getEstadisticasPorFase
 import { countConexionesActivas } from '../models/conexionesModel.js';
 import { countAllContactosPendientes } from '../models/contactosModel.js';
 import conexionesService from '../services/conexionesService.js';
-import whatsappController from './whatsappController.js';
+import baileysController from './baileysController.js';
 
 /**
  * Obtiene el resumen del dashboard

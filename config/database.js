@@ -23,11 +23,11 @@ const pool = mysql.createPool(dbConfig);
 export async function testConnection() {
   try {
     const connection = await pool.getConnection();
-    console.log('✅ Conexión a base de datos exitosa');
+    console.log('[INFO] Conexión a base de datos exitosa');
     connection.release();
     return true;
   } catch (error) {
-    console.error('❌ Error conectando a la base de datos:', error.message);
+    console.error('[ERROR] Error conectando a la base de datos:', error.message);
     return false;
   }
 }

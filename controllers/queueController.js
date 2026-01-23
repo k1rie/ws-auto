@@ -2,7 +2,7 @@ import { getAllConexiones, getConexionByWhatsAppId, updateConexionEstado } from 
 import { getFaseConfig } from '../models/fasesModel.js';
 import { countContactosPendientesByConexion } from '../models/contactosModel.js';
 import conexionesService from '../services/conexionesService.js';
-import whatsappController from './whatsappController.js';
+import baileysController from './baileysController.js';
 import mensajeriaService from '../services/mensajeriaService.js';
 
 /**
@@ -66,6 +66,8 @@ export async function getQueue(req, res) {
       return new Date(a.fechaRegistro) - new Date(b.fechaRegistro);
     });
 
+    const sendingStatus = mensajeriaService.getStatus();
+    
     res.json({
       success: true,
       data: {
@@ -77,7 +79,13 @@ export async function getQueue(req, res) {
         maxSockets: conexionesService.MAX_CONEXIONES,
         // Mantener compatibilidad
         disponibles: conexionesService.getAvailableSlots(),
-        maxConexiones: conexionesService.MAX_CONEXIONES
+        maxConexiones: conexionesService.MAX_CONEXIONES,
+        // Estado del servicio de mensajería
+        sendingStatus: {
+          isRunning: sendingStatus.isRunning,
+          isPaused: sendingStatus.isPaused,
+          hasActiveBatch: sendingStatus.hasActiveBatch
+        }
       }
     });
   } catch (error) {
@@ -104,7 +112,7 @@ export async function initializeConnection(req, res) {
     }
 
     // Verificar si ya existe
-    const existing = whatsappController.getClient(whatsappId);
+    const existing = baileysController.getSocket(whatsappId);
     if (existing) {
       return res.json({
         success: true,
@@ -117,7 +125,7 @@ export async function initializeConnection(req, res) {
     }
 
     // Inicializar
-    await whatsappController.initialize(whatsappId, nombreUsuario);
+    await baileysController.initialize(whatsappId, nombreUsuario);
 
     res.json({
       success: true,
@@ -188,3 +196,83 @@ export async function forceProcess(req, res) {
   }
 }
 
+/**
+ * Pausa el envío de mensajes
+ */
+export async function pauseSending(req, res) {
+  try {
+    mensajeriaService.pause();
+    const status = mensajeriaService.getStatus();
+    
+    res.json({
+      success: true,
+      message: 'Envío de mensajes pausado',
+      data: status
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Reanuda el envío de mensajes
+ */
+export async function resumeSending(req, res) {
+  try {
+    mensajeriaService.resume();
+    const status = mensajeriaService.getStatus();
+    
+    res.json({
+      success: true,
+      message: 'Envío de mensajes reanudado',
+      data: status
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Obtiene el estado del servicio de mensajería
+ */
+export async function getSendingStatus(req, res) {
+  try {
+    const status = mensajeriaService.getStatus();
+    
+    res.json({
+      success: true,
+      data: status
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}
+
+/**
+ * Envía todos los mensajes pendientes inmediatamente
+ */
+export async function sendAllNow(req, res) {
+  try {
+    const resultado = await mensajeriaService.sendAllNow();
+    
+    res.json({
+      success: true,
+      message: resultado.message,
+      data: resultado
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+}

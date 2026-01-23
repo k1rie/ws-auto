@@ -18,8 +18,8 @@ class WhatsAppVerificationService {
     let client = null;
     let whatsappId = null;
 
-    // Importar whatsappController una vez
-    const whatsappController = (await import('../controllers/whatsappController.js')).default;
+    // Importar baileysController una vez
+    const baileysController = (await import('../controllers/baileysController.js')).default;
 
     // Buscar cualquier conexión activa con socket listo (sin importar la fase)
     for (const conexion of conexionesActivas) {
@@ -29,12 +29,13 @@ class WhatsAppVerificationService {
           // Verificar directamente con el socket si está listo
           let isReady = false;
           try {
-            const info = await socket.info;
-            isReady = !!info;
+            // Baileys usa socket.user en lugar de socket.info
+            const user = socket.user;
+            isReady = !!user;
           } catch (socketError) {
             // Si falla, intentar con getStatus como fallback
             try {
-              const status = await whatsappController.getStatus(conexion.whatsapp_id);
+              const status = await baileysController.getStatus(conexion.whatsapp_id);
               isReady = status.ready;
             } catch (statusError) {
               console.error(`Error verificando estado de ${conexion.whatsapp_id}:`, statusError.message);
@@ -45,7 +46,7 @@ class WhatsAppVerificationService {
           if (isReady) {
             client = socket;
             whatsappId = conexion.whatsapp_id;
-            console.log(`✅ Usando conexión ${whatsappId} (fase ${conexion.fase_actual || 'N/A'}) para verificar números`);
+            console.log(`[INFO] Usando conexión ${whatsappId} (fase ${conexion.fase_actual || 'N/A'}) para verificar números`);
             break;
           }
         } catch (e) {
@@ -58,14 +59,14 @@ class WhatsAppVerificationService {
 
     if (!client) {
       // Intentar obtener más información para debugging
-      console.log(`❌ No se encontró cliente disponible. Información de debugging:`);
+      console.log('[WARN] No se encontró cliente disponible. Información de debugging:');
       console.log(`   - Conexiones en BD: ${conexionesActivas.length}`);
       for (const conexion of conexionesActivas) {
         const socket = conexionesService.getSocketByWhatsAppId(conexion.whatsapp_id);
-        console.log(`   - ${conexion.whatsapp_id}: socket=${socket ? '✅' : '❌'}`);
+        console.log(`   - ${conexion.whatsapp_id}: socket=${socket ? 'SI' : 'NO'}`);
         if (socket) {
           try {
-            const status = await whatsappController.getStatus(conexion.whatsapp_id);
+            const status = await baileysController.getStatus(conexion.whatsapp_id);
             console.log(`     Estado: ready=${status.ready}, message=${status.message}`);
           } catch (e) {
             console.log(`     Error obteniendo estado: ${e.message}`);
@@ -75,48 +76,35 @@ class WhatsAppVerificationService {
       throw new Error('No hay conexión activa de WhatsApp disponible para verificar números');
     }
 
-    // Formatear número para WhatsApp (agregar @c.us si no lo tiene)
-    const chatId = phoneNumber.includes('@c.us') ? phoneNumber : `${phoneNumber}@c.us`;
+    // Formatear número para Baileys (agregar @s.whatsapp.net si no lo tiene)
+    const jid = phoneNumber.includes('@s.whatsapp.net') ? phoneNumber : 
+                phoneNumber.includes('@c.us') ? phoneNumber.replace('@c.us', '@s.whatsapp.net') :
+                `${phoneNumber}@s.whatsapp.net`;
 
     try {
-      // Método 1: Intentar usar isRegisteredUser (método más directo)
-      if (typeof client.isRegisteredUser === 'function') {
-        const isRegistered = await client.isRegisteredUser(chatId);
-        return isRegistered;
+      // Con Baileys, usamos onWhatsApp para verificar si un número está registrado
+      // Este método está disponible en el socket de Baileys
+      const { onWhatsApp } = await import('@whiskeysockets/baileys');
+      
+      // onWhatsApp requiere un array de JIDs
+      const result = await onWhatsApp(client, [jid]);
+      
+      if (result && result.length > 0) {
+        return result[0].exists === true;
       }
-
-      // Método 2: Usar getNumberId (retorna null si no está registrado)
-      if (typeof client.getNumberId === 'function') {
-        const numberId = await client.getNumberId(chatId);
-        return numberId !== null;
-      }
-
-      // Método 3: Intentar obtener información del contacto (sin enviar mensaje)
-      // Esto es seguro porque getContactById solo consulta información, no envía nada
-      try {
-        const contact = await client.getContactById(chatId);
-        // Si el contacto existe y es un usuario, está registrado
-        return contact !== null && (contact.isUser === true || contact.isUser === undefined);
-      } catch (contactError) {
-        // Si falla con "No LID for user" o similar, el número no está registrado
-        const errorMessage = contactError.message || contactError.toString();
-        if (errorMessage.includes('No LID for user') || 
-            errorMessage.includes('not registered') ||
-            errorMessage.includes('not found')) {
-          return false;
-        }
-        // Para otros errores, asumir que no está registrado
-        return false;
-      }
+      
+      return false;
     } catch (error) {
       // Detectar errores específicos
       const errorMessage = error.message || error.toString();
-      if (errorMessage.includes('No LID for user') || 
-          errorMessage.includes('not registered') ||
-          errorMessage.includes('not found')) {
+      if (errorMessage.includes('not registered') ||
+          errorMessage.includes('not found') ||
+          errorMessage.includes('invalid')) {
         return false;
       }
-      throw error;
+      // Para otros errores, asumir que no está registrado por seguridad
+      console.warn(`[WARN] Error verificando número ${phoneNumber}: ${errorMessage}`);
+      return false;
     }
   }
 
@@ -165,66 +153,67 @@ class WhatsAppVerificationService {
       // Obtener todas las conexiones activas (sin importar la fase)
       const conexionesActivas = await getConexionesActivas();
       
-      console.log(`🔍 Verificando disponibilidad: ${conexionesActivas.length} conexión(es) activa(s) en BD`);
+      console.log(`[INFO] Verificando disponibilidad: ${conexionesActivas.length} conexión(es) activa(s) en BD`);
       
       if (conexionesActivas.length === 0) {
-        console.log(`❌ No hay conexiones activas en la base de datos`);
+        console.log('[INFO] No hay conexiones activas en la base de datos');
         return false;
       }
       
       // Obtener todos los sockets registrados para debugging
-      const whatsappController = (await import('../controllers/whatsappController.js')).default;
+      const baileysController = (await import('../controllers/baileysController.js')).default;
       
       for (const conexion of conexionesActivas) {
-        console.log(`🔍 Verificando conexión: ${conexion.whatsapp_id} (fase ${conexion.fase_actual || 'N/A'})`);
+        console.log(`[INFO] Verificando conexión: ${conexion.whatsapp_id} (fase ${conexion.fase_actual || 'N/A'})`);
         
         // Intentar obtener socket con el whatsapp_id de la BD
         let socket = conexionesService.getSocketByWhatsAppId(conexion.whatsapp_id);
         
         if (!socket) {
-          console.log(`   ⚠️  No se encontró socket registrado para ${conexion.whatsapp_id}`);
+          console.log(`   [WARN] No se encontró socket registrado para ${conexion.whatsapp_id}`);
           // Continuar con la siguiente conexión
           continue;
         }
         
-        console.log(`   ✅ Socket encontrado para ${conexion.whatsapp_id}`);
+        console.log(`   [INFO] Socket encontrado para ${conexion.whatsapp_id}`);
         
         try {
           // Verificar directamente con el socket si tiene info disponible
           let isReady = false;
           try {
-            const info = await socket.info;
-            isReady = !!info;
-            console.log(`   📊 Estado del socket: ready=${isReady}`);
+            // Baileys usa socket.user en lugar de socket.info
+            const user = socket.user;
+            isReady = !!user;
+            console.log(`   [INFO] Estado del socket: ready=${isReady}`);
           } catch (socketError) {
-            console.log(`   ⚠️  Error obteniendo info del socket: ${socketError.message}`);
+            console.log(`   [WARN] Error obteniendo user del socket: ${socketError.message}`);
             // Intentar con getStatus como fallback
-            const status = await whatsappController.getStatus(conexion.whatsapp_id);
+            const status = await baileysController.getStatus(conexion.whatsapp_id);
             isReady = status.ready;
-            console.log(`   📊 Estado (fallback): ready=${isReady}, message=${status.message}`);
+            console.log(`   [INFO] Estado (fallback): ready=${isReady}, message=${status.message}`);
           }
           
           if (isReady) {
-            console.log(`✅ Conexión disponible para verificación: ${conexion.whatsapp_id} (fase ${conexion.fase_actual || 'N/A'})`);
+            console.log(`[INFO] Conexión disponible para verificación: ${conexion.whatsapp_id} (fase ${conexion.fase_actual || 'N/A'})`);
             return true;
           } else {
-            console.log(`   ⚠️  Conexión ${conexion.whatsapp_id} no está lista`);
+            console.log(`   [INFO] Conexión ${conexion.whatsapp_id} no está lista`);
           }
         } catch (e) {
-          console.error(`   ❌ Error verificando estado de ${conexion.whatsapp_id}:`, e.message);
+          console.error(`   [ERROR] Error verificando estado de ${conexion.whatsapp_id}:`, e.message);
           continue;
         }
       }
       
-      console.log(`❌ No hay conexiones activas disponibles para verificación`);
-      console.log(`💡 Asegúrate de que:`);
+      console.log('[INFO] No hay conexiones activas disponibles para verificación');
+      console.log('[INFO] Asegúrate de que:');
       console.log(`   1. El número esté conectado y el QR haya sido escaneado`);
       console.log(`   2. El cliente esté en estado 'ready'`);
       console.log(`   3. El socket esté registrado correctamente`);
       
       return false;
     } catch (error) {
-      console.error(`❌ Error verificando disponibilidad:`, error.message);
+      console.error('[ERROR] Error verificando disponibilidad:', error.message);
       console.error(error.stack);
       return false;
     }

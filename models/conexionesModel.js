@@ -101,7 +101,7 @@ export async function updateConexionWhatsAppId(whatsappIdAnterior, whatsappIdNue
   
   if (conexionConNumeroReal) {
     // Si ya existe una conexión con el número real, actualizarla y eliminar la temporal
-    console.log(`🔄 Ya existe conexión con número real ${whatsappIdNuevo}, actualizando y eliminando temporal ${whatsappIdAnterior}`);
+    console.log(`[INFO] Ya existe conexión con número real ${whatsappIdNuevo}, actualizando y eliminando temporal ${whatsappIdAnterior}`);
     
     // Actualizar la conexión existente con el número real
     const sqlUpdate = `
@@ -115,7 +115,7 @@ export async function updateConexionWhatsAppId(whatsappIdAnterior, whatsappIdNue
     if (conexionTemporal && conexionTemporal.id !== conexionConNumeroReal.id) {
       const sqlDelete = `DELETE FROM conexiones WHERE whatsapp_id = ?`;
       await query(sqlDelete, [whatsappIdAnterior]);
-      console.log(`🗑️  Conexión temporal ${whatsappIdAnterior} eliminada`);
+      console.log(`[INFO] Conexión temporal ${whatsappIdAnterior} eliminada`);
     }
     
     return await getConexionByWhatsAppId(whatsappIdNuevo);
@@ -123,7 +123,7 @@ export async function updateConexionWhatsAppId(whatsappIdAnterior, whatsappIdNue
     // Si no existe conexión con el número real
     if (conexionTemporal) {
       // Si existe conexión temporal, actualizarla con el número real
-      console.log(`🔄 Actualizando conexión temporal ${whatsappIdAnterior} con número real ${whatsappIdNuevo}`);
+      console.log(`[INFO] Actualizando conexión temporal ${whatsappIdAnterior} con número real ${whatsappIdNuevo}`);
       const sql = `
         UPDATE conexiones 
         SET whatsapp_id = ?, nombre_usuario = ?, fecha_ultima_actividad = NOW()
@@ -133,7 +133,7 @@ export async function updateConexionWhatsAppId(whatsappIdAnterior, whatsappIdNue
       return await getConexionByWhatsAppId(whatsappIdNuevo);
     } else {
       // Si no existe conexión temporal, crear una nueva con el número real
-      console.log(`📝 Creando nueva conexión con número real ${whatsappIdNuevo}`);
+      console.log(`[INFO] Creando nueva conexión con número real ${whatsappIdNuevo}`);
       return await createOrUpdateConexion(whatsappIdNuevo, nombreUsuario);
     }
   }
@@ -160,7 +160,7 @@ export async function incrementMensajesEnviados(whatsappId, cantidad = 1) {
 export async function resetMensajesDiarios() {
   const sql = "UPDATE conexiones SET mensajes_enviados_hoy = 0";
   await query(sql);
-  console.log('✅ Mensajes diarios reseteados para todas las conexiones');
+  console.log('[INFO] Mensajes diarios reseteados para todas las conexiones');
 }
 
 /**
@@ -198,7 +198,7 @@ export async function checkAndUpdateFase(whatsappId) {
     
     if (faseActualIndex < todasLasFases.length - 1) {
       const siguienteFase = todasLasFases[faseActualIndex + 1].fase;
-      console.log(`🔄 Cambiando conexión ${whatsappId} de fase ${conexion.fase_actual} a fase ${siguienteFase}`);
+      console.log(`[INFO] Cambiando conexión ${whatsappId} de fase ${conexion.fase_actual} a fase ${siguienteFase}`);
       return await updateConexionFase(whatsappId, siguienteFase);
     }
   }
@@ -216,7 +216,7 @@ export async function updateFasesTodasConexiones() {
     let actualizadas = 0;
     let errores = 0;
 
-    console.log(`🔄 Revisando ${conexiones.length} conexión(es) activa(s) para actualizar fases...`);
+    console.log(`[INFO] Revisando ${conexiones.length} conexión(es) activa(s) para actualizar fases...`);
 
     for (const conexion of conexiones) {
       try {
@@ -226,13 +226,13 @@ export async function updateFasesTodasConexiones() {
         if (conexionActualizada && conexionActualizada.fase_actual !== conexionAnterior) {
           actualizadas++;
           console.log(
-            `✅ Conexión ${conexion.whatsapp_id}: Fase ${conexionAnterior} → ${conexionActualizada.fase_actual}`
+            `[INFO] Conexión ${conexion.whatsapp_id}: Fase ${conexionAnterior} -> ${conexionActualizada.fase_actual}`
           );
         }
       } catch (error) {
         errores++;
         console.error(
-          `❌ Error actualizando fase de conexión ${conexion.whatsapp_id}:`,
+          `[ERROR] Error actualizando fase de conexión ${conexion.whatsapp_id}:`,
           error.message
         );
       }
@@ -240,13 +240,13 @@ export async function updateFasesTodasConexiones() {
 
     if (actualizadas > 0 || errores > 0) {
       console.log(
-        `📊 Actualización de fases completada: ${actualizadas} actualizada(s), ${errores} error(es)`
+        `[INFO] Actualización de fases completada: ${actualizadas} actualizada(s), ${errores} error(es)`
       );
     }
 
     return { actualizadas, errores, total: conexiones.length };
   } catch (error) {
-    console.error('❌ Error en updateFasesTodasConexiones:', error);
+    console.error('[ERROR] Error en updateFasesTodasConexiones:', error);
     throw error;
   }
 }

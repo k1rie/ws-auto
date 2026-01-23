@@ -1,5 +1,5 @@
 import express from 'express';
-import whatsappController from '../controllers/whatsappController.js';
+import baileysController from '../controllers/baileysController.js';
 
 const router = express.Router();
 
@@ -15,15 +15,15 @@ router.get('/status', async (req, res) => {
       });
     }
 
-    const status = await whatsappController.getStatus(whatsappId);
-    const client = whatsappController.getClient(whatsappId);
+    const status = await baileysController.getStatus(whatsappId);
+    const socket = baileysController.getSocket(whatsappId);
     
     res.json({
       success: true,
       data: {
         whatsappId,
         ready: status.ready,
-        connected: client !== null,
+        connected: socket !== null,
         message: status.message
       }
     });
@@ -47,15 +47,15 @@ router.get('/qr', async (req, res) => {
       });
     }
 
-    // Verificar si el cliente existe
-    let client = whatsappController.getClient(whatsappId);
+    // Verificar si el socket existe
+    let socket = baileysController.getSocket(whatsappId);
     
-    // Si no existe cliente, inicializar automáticamente
-    if (!client) {
+    // Si no existe socket, inicializar automáticamente
+    if (!socket) {
       console.log(`Cliente ${whatsappId} no existe, inicializando automáticamente...`);
       try {
-        await whatsappController.initialize(whatsappId, nombreUsuario || whatsappId);
-        client = whatsappController.getClient(whatsappId);
+        await baileysController.initialize(whatsappId, nombreUsuario || whatsappId);
+        socket = baileysController.getSocket(whatsappId);
       } catch (error) {
         return res.status(error.message.includes('espacio disponible') ? 403 : 500).json({
           success: false,
@@ -69,7 +69,7 @@ router.get('/qr', async (req, res) => {
     }
 
     // Verificar si ya está conectado
-    const status = await whatsappController.getStatus(whatsappId);
+    const status = await baileysController.getStatus(whatsappId);
     if (status.ready) {
       return res.json({
         success: true,
@@ -84,7 +84,7 @@ router.get('/qr', async (req, res) => {
     }
 
     // Intentar obtener QR inmediatamente
-    let qr = whatsappController.qrCodes.get(whatsappId);
+    let qr = baileysController.qrCodes.get(whatsappId);
     if (qr) {
       return res.json({
         success: true,
@@ -97,7 +97,7 @@ router.get('/qr', async (req, res) => {
 
     // Si no hay QR disponible, esperar un poco (el cliente podría estar inicializando)
     console.log(`QR no disponible aún para ${whatsappId}, esperando...`);
-    qr = await whatsappController.waitForQR(whatsappId, 15000, 500); // Esperar hasta 15 segundos
+    qr = await baileysController.waitForQR(whatsappId, 15000, 500); // Esperar hasta 15 segundos
     
     if (qr) {
       return res.json({
@@ -110,7 +110,7 @@ router.get('/qr', async (req, res) => {
     }
     
     // Verificar si ya está conectado
-    const currentStatus = await whatsappController.getStatus(whatsappId);
+    const currentStatus = await baileysController.getStatus(whatsappId);
     if (currentStatus.ready) {
       return res.json({
         success: true,
@@ -155,10 +155,10 @@ router.post('/initialize', async (req, res) => {
       });
     }
 
-    const client = whatsappController.getClient(whatsappId);
-    if (client) {
-      const status = await whatsappController.getStatus(whatsappId);
-      const qr = whatsappController.qrCodes.get(whatsappId);
+    const socket = baileysController.getSocket(whatsappId);
+    if (socket) {
+      const status = await baileysController.getStatus(whatsappId);
+      const qr = baileysController.qrCodes.get(whatsappId);
       
       return res.json({
         success: true,
@@ -171,7 +171,7 @@ router.post('/initialize', async (req, res) => {
       });
     }
 
-    await whatsappController.initialize(whatsappId, nombreUsuario);
+    await baileysController.initialize(whatsappId, nombreUsuario);
     res.json({
       success: true,
       message: 'WhatsApp se está inicializando. Usa GET /api/whatsapp/qr?whatsappId=xxx para obtener el QR code.',
@@ -200,7 +200,7 @@ router.post('/send', async (req, res) => {
       });
     }
 
-    const status = await whatsappController.getStatus(whatsappId);
+    const status = await baileysController.getStatus(whatsappId);
     if (!status.ready) {
       return res.status(400).json({
         success: false,
@@ -208,7 +208,7 @@ router.post('/send', async (req, res) => {
       });
     }
 
-    const result = await whatsappController.sendMessage(whatsappId, number, message);
+    const result = await baileysController.sendMessage(whatsappId, number, message);
     
     res.json({
       success: true,
@@ -236,12 +236,12 @@ router.post('/connect', async (req, res) => {
     }
 
     // Verificar si ya está conectado
-    const existingClient = whatsappController.getClient(whatsappId);
+    const existingSocket = baileysController.getSocket(whatsappId);
     let status = null;
     let existingQR = null;
     
-    if (existingClient) {
-      status = await whatsappController.getStatus(whatsappId);
+    if (existingSocket) {
+      status = await baileysController.getStatus(whatsappId);
       
       if (status.ready) {
         return res.json({
@@ -257,7 +257,7 @@ router.post('/connect', async (req, res) => {
       }
 
       // Si está inicializado pero no conectado, verificar si hay QR
-      existingQR = whatsappController.qrCodes.get(whatsappId);
+      existingQR = baileysController.qrCodes.get(whatsappId);
       if (existingQR) {
         return res.json({
           success: true,
@@ -272,12 +272,12 @@ router.post('/connect', async (req, res) => {
       }
     }
 
-    // Inicializar cliente (forzar reinicialización si no tiene QR y no está listo)
-    const needsReinit = existingClient && status && !status.ready && !existingQR;
-    await whatsappController.initialize(whatsappId, nombreUsuario, needsReinit);
+    // Inicializar socket (forzar reinicialización si no tiene QR y no está listo)
+    const needsReinit = existingSocket && status && !status.ready && !existingQR;
+    await baileysController.initialize(whatsappId, nombreUsuario, needsReinit);
 
     // Esperar a que se genere el QR (máximo 30 segundos)
-    const qr = await whatsappController.waitForQR(whatsappId, 30000, 1000);
+    const qr = await baileysController.waitForQR(whatsappId, 30000, 1000);
 
     if (qr) {
       res.json({
@@ -292,7 +292,7 @@ router.post('/connect', async (req, res) => {
       });
     } else {
       // Verificar si ya está conectado (puede haber sido muy rápido)
-      const status = await whatsappController.getStatus(whatsappId);
+      const status = await baileysController.getStatus(whatsappId);
       if (status.ready) {
         res.json({
           success: true,
@@ -337,7 +337,7 @@ router.post('/logout', async (req, res) => {
       });
     }
 
-    const result = await whatsappController.logout(whatsappId);
+    const result = await baileysController.logout(whatsappId);
     
     if (result) {
       res.json({
@@ -361,7 +361,7 @@ router.post('/logout', async (req, res) => {
 // Reiniciar todos los sockets (desconectar todas las conexiones)
 router.post('/reset-sockets', async (req, res) => {
   try {
-    const resultado = await whatsappController.resetAllSockets();
+    const resultado = await baileysController.resetAllSockets();
     
     res.json({
       success: true,
@@ -421,7 +421,7 @@ router.get('/chats-responses', async (req, res) => {
       });
     }
 
-    const resultados = await whatsappController.getChatsWithResponses(
+    const resultados = await baileysController.getChatsWithResponses(
       limitMensajes, 
       fechaInicioDate, 
       fechaFinDate

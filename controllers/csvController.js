@@ -38,7 +38,7 @@ export async function uploadCSV(req, res) {
     }
     // Si no hay sessionId, conexionId será null y los contactos estarán disponibles para cualquier conexión
     
-    console.log(`📝 Subiendo CSV con conexionId: ${conexionId || 'NULL (disponible para cualquier conexión)'}`);
+    console.log(`[INFO] Subiendo CSV con conexionId: ${conexionId || 'NULL (disponible para cualquier conexión)'}`);
 
     // Leer y procesar CSV
     const contactos = [];
@@ -73,8 +73,8 @@ export async function uploadCSV(req, res) {
                   headerMap[key.replace(/\s+/g, '_')] = index;
                 }
               });
-              console.log('📋 Headers detectados:', Object.keys(headerMap).filter(k => !k.includes('_')));
-              console.log('📋 Mapa completo:', headerMap);
+              console.log('[INFO] Headers detectados:', Object.keys(headerMap).filter(k => !k.includes('_')));
+              console.log('[INFO] Mapa completo:', headerMap);
               isFirstRow = false;
               return; // Saltar la primera fila (headers)
             }
@@ -182,19 +182,19 @@ export async function uploadCSV(req, res) {
     });
 
     // Log para debugging
-    console.log(`📊 CSV procesado: ${contactos.length} contactos válidos, ${errors.length} errores`);
+    console.log(`[INFO] CSV procesado: ${contactos.length} contactos válidos, ${errors.length} errores`);
     if (contactos.length > 0) {
-      console.log(`✅ Primer contacto válido:`, {
+      console.log('[INFO] Primer contacto válido:', {
         nombre: contactos[0].nombre,
         telefono: contactos[0].telefono
       });
     }
     if (errors.length > 0) {
-      console.log(`❌ Primer error:`, errors[0]);
+      console.log('[WARN] Primer error:', errors[0]);
     }
 
     // Verificar números en WhatsApp usando whatsapp-web.js
-    console.log(`🔍 Verificando números en WhatsApp...`);
+    console.log('[INFO] Verificando números en WhatsApp...');
     const contactosVerificados = [];
     const contactosRechazados = [];
 
@@ -202,7 +202,7 @@ export async function uploadCSV(req, res) {
     const hayConexionDisponible = await whatsappVerificationService.isAvailable();
     
     if (!hayConexionDisponible) {
-      console.log(`❌ No hay conexión activa de WhatsApp disponible. No se pueden subir contactos sin verificación.`);
+      console.log('[WARN] No hay conexión activa de WhatsApp disponible. No se pueden subir contactos sin verificación.');
       
       // Limpiar archivo temporal
       fs.unlinkSync(filePath);
@@ -240,7 +240,7 @@ export async function uploadCSV(req, res) {
       }
     }
 
-    console.log(`📊 Verificando ${numerosUnicos.size} números únicos...`);
+    console.log(`[INFO] Verificando ${numerosUnicos.size} números únicos...`);
 
     // Verificar todos los números en lote
     const resultadosVerificacion = await whatsappVerificationService.verifyBatch(Array.from(numerosUnicos));
@@ -284,9 +284,9 @@ export async function uploadCSV(req, res) {
             telefonosVerificados.telefono = value;
             tieneNumeroValido = true;
           }
-          console.log(`✅ Número ${value} verificado y está en WhatsApp`);
+          console.log(`[INFO] Número ${value} verificado y está en WhatsApp`);
         } else {
-          console.log(`❌ Número ${value} no está registrado en WhatsApp`);
+          console.log(`[INFO] Número ${value} no está registrado en WhatsApp`);
         }
       }
 
@@ -319,7 +319,7 @@ export async function uploadCSV(req, res) {
       }
     }
 
-    console.log(`✅ Verificación completada: ${contactosVerificados.length} contactos válidos, ${contactosRechazados.length} rechazados`);
+    console.log(`[INFO] Verificación completada: ${contactosVerificados.length} contactos válidos, ${contactosRechazados.length} rechazados`);
 
     // Guardar solo los contactos verificados en base de datos
     const result = await createContactosBulk(conexionId, contactosVerificados);
@@ -328,7 +328,7 @@ export async function uploadCSV(req, res) {
     fs.unlinkSync(filePath);
 
     // Respuesta con información detallada
-    console.log(`💾 Base de datos: ${result.inserted} insertados, ${result.errors.length} errores de BD`);
+    console.log(`[INFO] Base de datos: ${result.inserted} insertados, ${result.errors.length} errores de BD`);
     
     res.json({
       success: true,

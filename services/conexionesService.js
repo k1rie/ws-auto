@@ -31,10 +31,10 @@ class ConexionesService {
   registerSocket(whatsappId, socket, isRegistration = false) {
     if (isRegistration) {
       this.registrationSockets.set(whatsappId, socket);
-      console.log(`📱 Socket de registro registrado para ${whatsappId}. Total registros: ${this.registrationSockets.size}/${this.MAX_CONEXIONES_REGISTRO}`);
+      console.log(`[INFO] Socket de registro registrado para ${whatsappId}. Total registros: ${this.registrationSockets.size}/${this.MAX_CONEXIONES_REGISTRO}`);
     } else {
       this.activeSockets.set(whatsappId, socket);
-      console.log(`📱 Socket activo registrado para ${whatsappId}. Total activos: ${this.activeSockets.size}/${this.MAX_CONEXIONES}`);
+      console.log(`[INFO] Socket activo registrado para ${whatsappId}. Total activos: ${this.activeSockets.size}/${this.MAX_CONEXIONES}`);
     }
   }
 
@@ -47,10 +47,10 @@ class ConexionesService {
     const removedFromRegistration = this.registrationSockets.delete(whatsappId);
     
     if (removedFromActive) {
-      console.log(`📱 Socket activo eliminado para ${whatsappId}. Total activos: ${this.activeSockets.size}/${this.MAX_CONEXIONES}`);
+      console.log(`[INFO] Socket activo eliminado para ${whatsappId}. Total activos: ${this.activeSockets.size}/${this.MAX_CONEXIONES}`);
     }
     if (removedFromRegistration) {
-      console.log(`📱 Socket de registro eliminado para ${whatsappId}. Total registros: ${this.registrationSockets.size}/${this.MAX_CONEXIONES_REGISTRO}`);
+      console.log(`[INFO] Socket de registro eliminado para ${whatsappId}. Total registros: ${this.registrationSockets.size}/${this.MAX_CONEXIONES_REGISTRO}`);
     }
   }
 
@@ -69,12 +69,12 @@ class ConexionesService {
     if (isRegistration) {
       const socketsRegistro = this.registrationSockets.size;
       const disponible = socketsRegistro < this.MAX_CONEXIONES_REGISTRO;
-      console.log(`🔍 Verificación de socket de registro: ${socketsRegistro}/${this.MAX_CONEXIONES_REGISTRO} sockets de registro`);
+      console.log(`[INFO] Verificación de socket de registro: ${socketsRegistro}/${this.MAX_CONEXIONES_REGISTRO} sockets de registro`);
       return disponible;
     } else {
       const socketsActivos = this.activeSockets.size;
       const disponible = socketsActivos < this.MAX_CONEXIONES;
-      console.log(`🔍 Verificación de socket activo: ${socketsActivos}/${this.MAX_CONEXIONES} sockets activos`);
+      console.log(`[INFO] Verificación de socket activo: ${socketsActivos}/${this.MAX_CONEXIONES} sockets activos`);
       return disponible;
     }
   }

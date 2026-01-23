@@ -80,9 +80,9 @@ class WhatsAppController {
     // registrarlo en la BD para que quede disponible cuando haya espacio
     // (Solo para conexiones de envío, no para registro)
     if (!isRegistration && !canCreate && !conexionExistente) {
-      console.log(`📝 No hay espacio para socket, pero registrando dispositivo ${whatsappId} en la BD...`);
+      console.log(`[INFO] No hay espacio para socket, pero registrando dispositivo ${whatsappId} en la BD...`);
       await conexionesService.createOrUpdateConexion(whatsappId, nombreUsuario || whatsappId);
-      console.log(`✅ Dispositivo ${whatsappId} registrado en la BD`);
+      console.log(`[INFO] Dispositivo ${whatsappId} registrado en la BD`);
     } else if (conexionExistente && nombreUsuario && nombreUsuario !== conexionExistente.nombre_usuario) {
       // Si ya existe y se proporcionó un nombre nuevo, actualizarlo
       await conexionesService.createOrUpdateConexion(whatsappId, nombreUsuario);
@@ -157,7 +157,7 @@ class WhatsAppController {
         const timeSinceLastQR = Date.now() - lastQRTimestamp;
         if (timeSinceLastQR < this.QR_COOLDOWN_MS) {
           const remainingSeconds = Math.ceil((this.QR_COOLDOWN_MS - timeSinceLastQR) / 1000);
-          console.log(`⏳ QR code para ${whatsappId} ignorado. Espera ${remainingSeconds} segundo(s) más antes de generar uno nuevo.`);
+          console.log(`[INFO] QR code para ${whatsappId} ignorado. Espera ${remainingSeconds} segundo(s) más antes de generar uno nuevo.`);
           return; // Ignorar este QR code
         }
       }
@@ -170,11 +170,11 @@ class WhatsAppController {
       const currentCount = this.qrCounts.get(whatsappId) || 0;
       const newCount = currentCount + 1;
       this.qrCounts.set(whatsappId, newCount);
-      console.log(`📊 QR code #${newCount} generado para ${whatsappId}`);
+      console.log(`[INFO] QR code #${newCount} generado para ${whatsappId}`);
       
       // Si se han generado 2 QR codes sin escanear, cerrar el cliente
       if (newCount >= this.MAX_QR_ATTEMPTS) {
-        console.log(`⚠️  Se han generado ${newCount} QR codes para ${whatsappId} sin escanear. Cerrando cliente automáticamente...`);
+        console.log(`[WARN] Se han generado ${newCount} QR codes para ${whatsappId} sin escanear. Cerrando cliente automáticamente...`);
         this.cerrarClientePorQRNoEscaneado(whatsappId);
         return; // No generar más QR codes
       }
@@ -200,22 +200,25 @@ class WhatsAppController {
         nombreUsuario = info?.pushname || info?.wid?.user || whatsappId;
         
         if (info?.wid?.user) {
-          console.log(`📱 Información del WhatsApp obtenida: ${numeroReal} - ${nombreUsuario}`);
+          console.log(`[INFO] Información del WhatsApp obtenida: ${numeroReal} - ${nombreUsuario}`);
           
           // Guardar mapeo entre whatsappId original y número real
           if (numeroReal !== whatsappId) {
             this.whatsappIdToRealNumber.set(whatsappId, numeroReal);
-            console.log(`🔄 Actualizando/creando conexión: ${whatsappId} → ${numeroReal}`);
+            // También registrar el cliente con el número real para que se pueda encontrar por ambos IDs
+            this.clients.set(numeroReal, client);
+            console.log(`[INFO] Cliente registrado con ambos IDs: ${whatsappId} y ${numeroReal}`);
+            console.log(`[INFO] Actualizando/creando conexión: ${whatsappId} -> ${numeroReal}`);
             await updateConexionWhatsAppId(whatsappId, numeroReal, nombreUsuario);
           } else {
             // Si el número coincide, crear/actualizar la conexión
-            console.log(`📝 Creando/actualizando conexión con número ${numeroReal}`);
+            console.log(`[INFO] Creando/actualizando conexión con número ${numeroReal}`);
             await conexionesService.createOrUpdateConexion(numeroReal, nombreUsuario);
           }
         } else {
           // Si no se puede obtener el número, usar el whatsappId proporcionado
-          console.log(`⚠️  No se pudo obtener el número real, usando ${whatsappId}`);
-          console.log(`📝 Creando/actualizando conexión con whatsappId ${whatsappId}`);
+          console.log(`[WARN] No se pudo obtener el número real, usando ${whatsappId}`);
+          console.log(`[INFO] Creando/actualizando conexión con whatsappId ${whatsappId}`);
           await conexionesService.createOrUpdateConexion(whatsappId, nombreUsuario);
         }
       } catch (error) {
@@ -239,25 +242,25 @@ class WhatsAppController {
       let conexionFinal = await getConexionByWhatsAppId(numeroReal);
       if (!conexionFinal) {
         // Si por alguna razón no existe, crearla
-        console.log(`⚠️  Conexión no encontrada después de crear/actualizar, creando nueva...`);
+        console.log('[WARN] Conexión no encontrada después de crear/actualizar, creando nueva...');
         conexionFinal = await conexionesService.createOrUpdateConexion(numeroReal, nombreUsuario);
       }
       
       // Actualizar estado de conexión con el número real
       await updateConexionEstado(numeroReal, 'active');
       
-      console.log(`✅ Conexión ${numeroReal} creada/actualizada y marcada como activa en la BD`);
+      console.log(`[INFO] Conexión ${numeroReal} creada/actualizada y marcada como activa en la BD`);
       
       // Si esta conexión debe cerrarse automáticamente después de registrar
       if (this.autoCloseAfterRegister.has(whatsappId) || this.autoCloseAfterRegister.has(numeroReal)) {
-        console.log(`🔒 Cerrando cliente ${whatsappId} automáticamente después de registrar...`);
+        console.log(`[INFO] Cerrando cliente ${whatsappId} automáticamente después de registrar...`);
         // Esperar un momento para asegurar que los datos se guardaron
         setTimeout(async () => {
           try {
             await this.logout(whatsappId);
             this.autoCloseAfterRegister.delete(whatsappId);
             this.autoCloseAfterRegister.delete(numeroReal);
-            console.log(`✅ Cliente ${whatsappId} cerrado automáticamente después de registrar`);
+            console.log(`[INFO] Cliente ${whatsappId} cerrado automáticamente después de registrar`);
           } catch (error) {
             console.error(`Error cerrando cliente automáticamente:`, error);
           }
@@ -284,11 +287,12 @@ class WhatsAppController {
       // Si hay un número real mapeado, también desconectarlo
       const numeroReal = this.whatsappIdToRealNumber.get(whatsappId);
       if (numeroReal && numeroReal !== whatsappId) {
+        this.clients.delete(numeroReal); // Eliminar también el registro con el número real
         conexionesService.unregisterSocket(numeroReal);
         await updateConexionEstado(numeroReal, 'inactive');
         this.whatsappIdToRealNumber.delete(whatsappId);
       } else {
-      await updateConexionEstado(whatsappId, 'inactive');
+        await updateConexionEstado(whatsappId, 'inactive');
       }
       this.broadcast({ type: 'auth_failure', whatsappId, message: msg });
     });
@@ -304,11 +308,12 @@ class WhatsAppController {
       // Si hay un número real mapeado, también desconectarlo
       const numeroReal = this.whatsappIdToRealNumber.get(whatsappId);
       if (numeroReal && numeroReal !== whatsappId) {
+        this.clients.delete(numeroReal); // Eliminar también el registro con el número real
         conexionesService.unregisterSocket(numeroReal);
         await updateConexionEstado(numeroReal, 'inactive');
         this.whatsappIdToRealNumber.delete(whatsappId);
       } else {
-      await updateConexionEstado(whatsappId, 'inactive');
+        await updateConexionEstado(whatsappId, 'inactive');
       }
       this.broadcast({ type: 'disconnected', whatsappId, message: reason });
     });
@@ -316,7 +321,8 @@ class WhatsAppController {
 
   // Enviar mensaje usando un cliente específico
   async sendMessage(whatsappId, number, message) {
-    const client = this.clients.get(whatsappId);
+    // Usar getClient para que funcione con ambos IDs (temporal y número real)
+    const client = this.getClient(whatsappId);
     
     if (!client) {
       throw new Error(`No hay cliente activo para ${whatsappId}`);
@@ -360,15 +366,33 @@ class WhatsAppController {
   }
 
   // Obtener cliente por whatsappId
+  // Busca primero por el ID directo, luego por el mapeo de número real
   getClient(whatsappId) {
-    return this.clients.get(whatsappId) || null;
+    // Buscar directamente
+    let client = this.clients.get(whatsappId);
+    if (client) {
+      return client;
+    }
+    
+    // Si no se encuentra, buscar en el mapeo inverso (número real -> ID temporal)
+    for (const [tempId, realNumber] of this.whatsappIdToRealNumber.entries()) {
+      if (realNumber === whatsappId) {
+        client = this.clients.get(tempId);
+        if (client) {
+          return client;
+        }
+      }
+    }
+    
+    return null;
   }
 
   // Obtener estado de un cliente específico
+  // Busca primero por el ID directo, luego por el mapeo de número real
   async getStatus(whatsappId) {
-    const client = this.clients.get(whatsappId);
+    const client = this.getClient(whatsappId);
     if (!client) {
-    return {
+      return {
         ready: false,
         message: 'Cliente no inicializado'
       };
@@ -379,7 +403,7 @@ class WhatsAppController {
       return {
         ready: !!info,
         message: info ? 'Conectado' : 'Desconectado'
-    };
+      };
     } catch (error) {
       return {
         ready: false,
@@ -484,7 +508,7 @@ class WhatsAppController {
 
   // Reiniciar todos los sockets (desconectar y limpiar)
   async resetAllSockets() {
-    console.log('🔄 Reiniciando todos los sockets...');
+    console.log('[INFO] Reiniciando todos los sockets...');
     const resultados = [];
     
     for (const [whatsappId, client] of this.clients.entries()) {
@@ -521,7 +545,7 @@ class WhatsAppController {
     this.autoCloseAfterRegister.clear();
     this.whatsappIdToRealNumber.clear();
     
-    console.log(`✅ Reinicio completado. ${resultados.length} socket(s) procesado(s)`);
+    console.log(`[INFO] Reinicio completado. ${resultados.length} socket(s) procesado(s)`);
     return {
       total: resultados.length,
       resultados
@@ -530,7 +554,8 @@ class WhatsAppController {
 
   // Cerrar sesión de un cliente específico
   async logout(whatsappId) {
-    const client = this.clients.get(whatsappId);
+    // Buscar el cliente usando getClient para que funcione con ambos IDs
+    const client = this.getClient(whatsappId);
     if (client) {
       try {
         await client.logout();
@@ -543,12 +568,13 @@ class WhatsAppController {
         // Si hay un número real mapeado, también desconectarlo
         const numeroReal = this.whatsappIdToRealNumber.get(whatsappId);
         if (numeroReal && numeroReal !== whatsappId) {
+          this.clients.delete(numeroReal); // Eliminar también el registro con el número real
           conexionesService.unregisterSocket(numeroReal);
           this.autoCloseAfterRegister.delete(numeroReal);
           await updateConexionEstado(numeroReal, 'inactive');
           this.whatsappIdToRealNumber.delete(whatsappId);
         } else {
-        await updateConexionEstado(whatsappId, 'inactive');
+          await updateConexionEstado(whatsappId, 'inactive');
         }
         return true;
       } catch (error) {
@@ -563,14 +589,15 @@ class WhatsAppController {
         // Si hay un número real mapeado, también desconectarlo
         const numeroReal = this.whatsappIdToRealNumber.get(whatsappId);
         if (numeroReal && numeroReal !== whatsappId) {
+          this.clients.delete(numeroReal); // Eliminar también el registro con el número real
           conexionesService.unregisterSocket(numeroReal);
           this.autoCloseAfterRegister.delete(numeroReal);
           await updateConexionEstado(numeroReal, 'inactive');
           this.whatsappIdToRealNumber.delete(whatsappId);
         } else {
-        await updateConexionEstado(whatsappId, 'inactive');
+          await updateConexionEstado(whatsappId, 'inactive');
         }
-      return true;
+        return true;
       }
     }
     return false;
@@ -579,7 +606,7 @@ class WhatsAppController {
   // Cerrar cliente automáticamente cuando se generan múltiples QR sin escanear
   async cerrarClientePorQRNoEscaneado(whatsappId) {
     try {
-      console.log(`🔒 Cerrando cliente ${whatsappId} por múltiples QR codes no escaneados...`);
+      console.log(`[WARN] Cerrando cliente ${whatsappId} por múltiples QR codes no escaneados...`);
       
       const client = this.clients.get(whatsappId);
       if (client) {
@@ -600,6 +627,7 @@ class WhatsAppController {
       // Limpiar también el número real si existe
       const numeroReal = this.whatsappIdToRealNumber.get(whatsappId);
       if (numeroReal && numeroReal !== whatsappId) {
+        this.clients.delete(numeroReal); // Eliminar también el registro con el número real
         conexionesService.unregisterSocket(numeroReal);
         await updateConexionEstado(numeroReal, 'inactive');
         this.whatsappIdToRealNumber.delete(whatsappId);
@@ -607,7 +635,7 @@ class WhatsAppController {
         await updateConexionEstado(whatsappId, 'inactive');
       }
       
-      console.log(`✅ Cliente ${whatsappId} cerrado automáticamente por múltiples QR codes no escaneados`);
+      console.log(`[INFO] Cliente ${whatsappId} cerrado automáticamente por múltiples QR codes no escaneados`);
       this.broadcast({ 
         type: 'error', 
         whatsappId, 
@@ -649,7 +677,7 @@ class WhatsAppController {
         // Verificar que el cliente esté listo
         const status = await this.getStatus(whatsappId);
         if (!status.ready) {
-          console.log(`⚠️  Cliente ${whatsappId} no está listo, saltando...`);
+          console.log(`[INFO] Cliente ${whatsappId} no está listo, saltando...`);
           continue;
         }
 
@@ -665,7 +693,7 @@ class WhatsAppController {
         try {
           // Obtener todos los chats
           const chats = await client.getChats();
-          console.log(`📱 Revisando ${chats.length} chats para ${numeroEnvio}...`);
+          console.log(`[INFO] Revisando ${chats.length} chats para ${numeroEnvio}...`);
 
           // Procesar cada chat
           for (const chat of chats) {
@@ -764,7 +792,7 @@ class WhatsAppController {
                 chatsInfo.push(chatInfo);
               }
             } catch (chatError) {
-              console.error(`❌ Error procesando chat para ${numeroEnvio}:`, chatError.message);
+              console.error(`[ERROR] Error procesando chat para ${numeroEnvio}:`, chatError.message);
               // Continuar con el siguiente chat
             }
           }
@@ -778,7 +806,7 @@ class WhatsAppController {
           });
 
         } catch (error) {
-          console.error(`❌ Error obteniendo chats para ${numeroEnvio}:`, error.message);
+          console.error(`[ERROR] Error obteniendo chats para ${numeroEnvio}:`, error.message);
           resultados.push({
             whatsappId: numeroEnvio,
             nombreUsuario: info.pushname || numeroEnvio,
@@ -788,7 +816,7 @@ class WhatsAppController {
         }
 
       } catch (error) {
-        console.error(`❌ Error procesando cliente ${whatsappId}:`, error.message);
+        console.error(`[ERROR] Error procesando cliente ${whatsappId}:`, error.message);
         resultados.push({
           whatsappId: whatsappId,
           error: error.message,
